@@ -9,7 +9,9 @@ const { showDashboard } = require("./Plugin/showDashboard");
  * @param {vscode.ExtensionContext} context
  */
 async function activate(context) {
-  console.log("TakaTime: Initializing...");
+  const outputChannel = vscode.window.createOutputChannel("TakaTime");
+  context.subscriptions.push(outputChannel);
+  heartbeat.setOutputChannel(outputChannel);
 
   // 1. Status Bar
   const statusBar = vscode.window.createStatusBarItem(
@@ -52,7 +54,7 @@ async function activate(context) {
 
   context.subscriptions.push(dashStatusBar);
 
-  // 3. ⚡ SAVE LISTENER (Now with Heartbeat Logic!)
+  // 3a. Text-document Save Listener
   const saveListener = vscode.workspace.onDidSaveTextDocument((document) => {
     // Filter out junk
     if (document.uri.scheme !== "file") return;
@@ -64,7 +66,21 @@ async function activate(context) {
 
   context.subscriptions.push(saveListener);
 
-  // 3b. Notebook Save Listener
+  // 3b. Text-document typing Listener
+  const typingListener = vscode.workspace.onDidChangeTextDocument((event) => {
+    const document = event.document;
+
+    // Filter out junk
+    if (document.uri.scheme !== "file") return;
+    if (document.fileName.includes(path.sep + ".git" + path.sep)) return;
+    if (event.contentChanges.length === 0) return; // ignore no-op changes
+
+    heartbeat.handleHeartbeat(document); 
+  });
+
+  context.subscriptions.push(typingListener);
+
+  // 3c. Notebook Save Listener
   const notebookSaveListener = vscode.workspace.onDidSaveNotebookDocument((notebook) => {
     // Filter out junk
     if (notebook.uri.scheme !== "file") return;
@@ -80,6 +96,25 @@ async function activate(context) {
   });
 
   context.subscriptions.push(notebookSaveListener);
+
+  // 3d. Notebook Typing Listener
+  const notebookTypingListener = vscode.workspace.onDidChangeNotebookDocument((event) => {
+    const notebook = event.notebook;
+
+    // Filter out junk
+    if (notebook.uri.scheme !== "file") return;
+    if (notebook.uri.fsPath.includes(path.sep + ".git" + path.sep)) return;
+    if (event.contentChanges.length === 0 && event.cellChanges.length === 0) return;
+
+    const mockDocument = {
+      fileName: notebook.uri.fsPath,
+      uri: notebook.uri,
+      languageId: notebook.notebookType || "unknown-notebook"
+    };
+    heartbeat.handleHeartbeat(mockDocument);
+  });
+
+  context.subscriptions.push(notebookTypingListener);
 
   // 4. Initial Check
   statusHelper.checkStatus(statusBar);

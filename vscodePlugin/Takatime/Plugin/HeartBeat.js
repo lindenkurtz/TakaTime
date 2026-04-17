@@ -8,6 +8,13 @@ const fileTimestamps = new Map();
 // ⏳ THE COOLDOWN (Standard is 2 minutes)
 const COOLDOWN_MS = 120 * 1000;
 
+// Logging when Heartbeats are sent
+let _outputChannel = null;
+
+function setOutputChannel(channel) {
+  _outputChannel = channel;
+}
+
 /**
  * Handles the "Heartbeat" logic.
  * Decides if we should actually call the binary or just ignore the event.
@@ -26,6 +33,11 @@ function handleHeartbeat(document) {
     return;
   }
 
+  // Logging
+  if (_outputChannel) {
+    _outputChannel.appendLine(`TakaTime: Heartbeat sent — ${filePath}`);
+  }
+
   // 2. Fire the Upload
   uploader.spawnProcess(document);
 
@@ -33,4 +45,4 @@ function handleHeartbeat(document) {
   fileTimestamps.set(filePath, now);
 }
 
-module.exports = { handleHeartbeat };
+module.exports = { handleHeartbeat, setOutputChannel };
