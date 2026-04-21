@@ -6,7 +6,7 @@ const vscode = require("vscode");
 let lastHeartbeatTime = 0;
 
 // ⏳ THE COOLDOWN (Standard is 2 minutes)
-const COOLDOWN_MS = 120 * 1000;
+const COOLDOWN_MS = 300 * 1000; // changed to 5 minutes
 
 // Logging when Heartbeats are sent
 let _outputChannel = null;

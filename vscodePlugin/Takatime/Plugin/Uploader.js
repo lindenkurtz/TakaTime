@@ -32,7 +32,7 @@ function getGoArgs(document, mongoUri) {
     "-uri",
     mongoUri, // Passing URI as flag (required by your binary)
     "-duration",
-    "120", // Sending a default heartbeat duration (optional, fixes "less than 0" error)
+    "300", // Sending a default heartbeat duration (optional, fixes "less than 0" error)
     "-editor",
     "VsCode",
     // "Antigravity",
