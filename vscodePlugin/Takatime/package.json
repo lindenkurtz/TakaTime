@@ -4,8 +4,12 @@
   "description": "A privacy-first, serverless time tracker. Track coding metrics, visualize productivity, and maintain full data ownership.",
   "version": "0.1.3",
   "license": "MIT",
-  "publisher": "Rtarun3606k",
+  "publisher": "local-dev",
   "icon": "public/TakatimeLogo.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lindenkurtz/TakaTime"
+  },
   "engines": {
     "vscode": "^1.80.0"
   },
