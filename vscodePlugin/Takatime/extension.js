@@ -116,6 +116,24 @@ async function activate(context) {
 
   context.subscriptions.push(notebookTypingListener);
 
+  // 3e. Terminal Command Listener
+  const terminalCommandListener = vscode.window.onDidStartTerminalShellExecution((event) => {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    const mockUri = workspaceFolder 
+      ? vscode.Uri.joinPath(workspaceFolder.uri, ".takatime", "terminal")
+      : vscode.Uri.parse("file:///.takatime/terminal");
+    
+    const mockDocument = {
+      fileName: mockUri.fsPath,
+      uri: mockUri,
+      languageId: "zsh"
+    };
+
+    heartbeat.handleHeartbeat(mockDocument);
+  });
+
+  context.subscriptions.push(terminalCommandListener);
+
   // 4. Initial Check
   statusHelper.checkStatus(statusBar);
 }

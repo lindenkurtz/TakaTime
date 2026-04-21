@@ -3,7 +3,7 @@ const uploader = require("./Uploader");
 const vscode = require("vscode");
 
 // Key: File Path, Value: Last Timestamp (ms)
-const fileTimestamps = new Map();
+let lastHeartbeatTime = 0;
 
 // ⏳ THE COOLDOWN (Standard is 2 minutes)
 const COOLDOWN_MS = 120 * 1000;
@@ -23,15 +23,8 @@ function setOutputChannel(channel) {
 function handleHeartbeat(document) {
   const filePath = document.fileName;
   const now = Date.now();
-  const lastSaved = fileTimestamps.get(filePath) || 0;
-
-  // 1. Check Debounce/Throttle
-  // If it hasn't been 2 mins since the last ping for THIS file...
-  if (now - lastSaved < COOLDOWN_MS) {
-    // ... We skip it. (Optional: Log it for debugging)
-    // console.log("TakaTime: Debounced (Skipped)");
-    return;
-  }
+  
+  if (now - lastHeartbeatTime < COOLDOWN_MS) return;
 
   // Logging
   if (_outputChannel) {
@@ -42,7 +35,7 @@ function handleHeartbeat(document) {
   uploader.spawnProcess(document);
 
   // 3. Reset the Timer for this file
-  fileTimestamps.set(filePath, now);
+  lastHeartbeatTime = now;
 }
 
 module.exports = { handleHeartbeat, setOutputChannel };
