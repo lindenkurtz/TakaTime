@@ -245,35 +245,52 @@ actually bounds the error, and it is much smaller than `unstampedHeartbeats` (11
 
 ---
 
-## Known gaps
+## Trackers
 
-### The Mathematica tracker is not migrated
+Two trackers write to this database. **Both share the config regime timeline above** —
+that alignment is why `CONFIG_REGISTRY` is a single linear series rather than being
+keyed per tracker.
 
-A separate tracking setup writes heartbeats with `editor: "Mathematica"` — currently
-111 records, about 6.5% of attributed time. **These have no `configVersion` and were
-deliberately left unstamped by the migration.**
+| Tracker | Source | Writes via | Editor field |
+|---|---|---|---|
+| VS Code | [`vscodePlugin/Takatime/`](vscodePlugin/Takatime/) | `taka-upload` (Go) | `VsCode` |
+| Mathematica | [`trackers/mathematica/`](trackers/mathematica/) | pymongo, direct | `Mathematica` |
 
-Stamping them with a VS Code config version would assert something not known to be
-true: the Mathematica setup has its own throttle behaviour, which is undocumented and
-demonstrably different (nine records from 2026-05-21 carry `duration: 30`, a value
-the VS Code tracker never wrote).
+The Mathematica tracker was previously undocumented and excluded from the migration,
+because its throttle history was unknown. Its source now lives in this repository, and
+the data confirms it followed the same regimes on the same boundaries:
 
-**Consequence:** Mathematica heartbeats resolve their interval through the *date
-fallback*, inheriting whatever VS Code regime was current at that instant. For
-heartbeats mid-session this costs nothing. For session heads it is a **guess**, and
-the guess is visible in `inexactIntervalHeartbeats` rather than silently folded into
-the total.
+| Duration written | Regime window | Heartbeats | Range |
+|---|---|---|---|
+| 120s | v1 | 51 | 2026-04-13 .. 04-23 |
+| 300s | v2 | 51 | 2026-04-23 .. 08-08 |
+| 30s | v2 | 9 | 2026-05-21 (experiment) |
 
-The Mathematica tracker lives **outside this repository** and invokes `taka-upload`
-directly. For that reason `-configVersion` is deliberately an *optional* flag on the
-binary: requiring it would silently drop every Mathematica heartbeat, since callers
-spawn the process fire-and-forget with stdio discarded. Unstamped heartbeats are
-stored unstamped and interpreted by date — degraded, but not lost.
+Every heartbeat in the database now carries a `configVersion`. Nothing is resolved by
+date fallback, and `unstampedHeartbeats` / `inexactIntervalHeartbeats` are both zero.
 
-**To close this gap:** determine the Mathematica tracker's actual throttle history,
-add it to `CONFIG_REGISTRY` as its own regime series, and extend the migration to
-stamp `editor: "Mathematica"` records. Until then, treat Mathematica time as
-estimated, and exclude it from any comparison against WakaTime.
+**Keeping them aligned is a maintenance obligation.** Three constants must agree:
+`$TakatimeInterval` in `TakatimePalette.wl`, `CONFIG_VERSION` in
+`takatime_mathematica.py`, and the open-ended regime in `CONFIG_REGISTRY`. If the two
+trackers ever diverge, the registry has to become per-tracker — a schema change. The
+test `Mathematica shares the VS Code regime timeline` fails if that assumption breaks.
+
+### Remaining caveats
+
+**The 30-second experiment.** Nine heartbeats on 2026-05-21 ran at a 30s throttle
+inside the v2 (300s) window and are stamped v2 with everything else there. They fall
+in a single session, so the worst case is one session head credited 300s instead of
+30s — 270 seconds, once, across the whole history. A fourth regime would cost more
+clarity than it buys accuracy.
+
+**WakaTime never observed Mathematica.** Calibration must still filter to
+`editor === "VsCode"`, regardless of stamping. Including Mathematica inflates
+2026-08-08 by 47%, which is an artifact of the comparison, not an algorithm error.
+
+**`-configVersion` remains optional on `taka-upload`.** Callers spawn it
+fire-and-forget with stdio discarded, so a hard requirement would turn any
+misconfigured caller into silent data loss. The date fallback stays supported and
+tested for exactly that reason.
 
 ### The write-side deployment window
 

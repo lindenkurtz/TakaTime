@@ -21,7 +21,8 @@
       "2026-08-07": 20760,
       "2026-08-08": 1620
     },
-    "rangeTotalSeconds": 29820
+    "rangeTotalSeconds": 29820,
+    "note": "WakaTime only observed VS Code. Comparisons must filter to editor === \"VsCode\" even though every heartbeat now carries a configVersion."
   },
   "heartbeats": [
     {
@@ -1191,7 +1192,8 @@
       "os": "darwin",
       "gitBranch": "none",
       "editor": "Mathematica",
-      "duration": 300
+      "duration": 300,
+      "configVersion": 2
     },
     {
       "_id": "6a7778199dac94ccfbf0e2e9",
@@ -1203,7 +1205,8 @@
       "os": "darwin",
       "gitBranch": "none",
       "editor": "Mathematica",
-      "duration": 300
+      "duration": 300,
+      "configVersion": 2
     },
     {
       "_id": "6a77855bc1d0be6b5c43889f",

@@ -139,12 +139,16 @@ export function toEpochMs(value) {
  *
  * Preferred path: the heartbeat's own `configVersion`, stamped at write time.
  *
- * DOCUMENTED FALLBACK: heartbeats with no `configVersion` resolve by matching
- * their timestamp against the config registry. This is how heartbeats from the
- * un-migrated Mathematica tracker are handled — they get the VS Code regime that
- * was current at that instant, which is a GUESS, not a fact. Never throws; if
- * nothing matches, the nearest regime by time is used. Inspect `.exact` and
- * `.reason` to see which path was taken.
+ * DOCUMENTED FALLBACK: heartbeats with no `configVersion` resolve by matching their
+ * timestamp against the config registry. That is a GUESS, not a fact — it assumes the
+ * writing tracker followed the regime timeline recorded here.
+ *
+ * All current data is stamped, so nothing relies on this today. It stays supported
+ * because `-configVersion` is optional on the writer: callers spawn it
+ * fire-and-forget with stdio discarded, so estimating a heartbeat beats losing it.
+ *
+ * Never throws; if nothing matches, the nearest regime by time is used. Inspect
+ * `.exact` and `.reason` to see which path was taken.
  */
 export function resolveInterval(heartbeat, configs = CONFIG_REGISTRY) {
   const declared = heartbeat.configVersion;
@@ -373,9 +377,10 @@ export function computeDurations(heartbeats, options = {}) {
     /** Heartbeats pulled in only by the lookback buffer, to avoid splitting a session. */
     contextHeartbeats,
     /**
-     * Counted heartbeats carrying no `configVersion` — currently the un-migrated
-     * Mathematica tracker. These are attributed by the date fallback. Non-zero
-     * means part of this result rests on an assumption. See METHODOLOGY.md.
+     * Counted heartbeats carrying no `configVersion`, attributed by the date
+     * fallback. Expected to be zero — every tracker stamps at write time and all
+     * historical data is backfilled. Non-zero means a tracker is misconfigured and
+     * part of this result rests on an assumption. See METHODOLOGY.md.
      */
     unstampedHeartbeats,
     /**

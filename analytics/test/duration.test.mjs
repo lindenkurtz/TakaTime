@@ -296,31 +296,44 @@ test("a heartbeat predating the registry is clamped, never thrown on", () => {
   assert.ok(Number.isFinite(r.intervalSeconds));
 });
 
-test("unstamped Mathematica heartbeats are counted but reported as inexact", () => {
+test("every heartbeat in the fixture is stamped, including the Mathematica tracker", () => {
   const mathematica = fixture.heartbeats.filter((h) => h.editor === "Mathematica");
-  assert.ok(mathematica.length > 0, "fixture should contain the un-migrated tracker");
+  assert.ok(mathematica.length > 0, "fixture should contain both trackers");
   assert.ok(
-    mathematica.every((h) => h.configVersion === undefined),
-    "Mathematica heartbeats must stay unstamped — that is the documented gap",
+    fixture.heartbeats.every((h) => Number.isInteger(h.configVersion)),
+    "no heartbeat should need the date fallback any more",
   );
 
   const r = computeDurations(fixture.heartbeats, { range: fixture.range, timeZone: fixture.timeZone });
   assert.ok(r.totalMs > 0);
-  assert.ok(
-    r.unstampedHeartbeats >= mathematica.length,
-    "unstamped heartbeats must be visible in the result, not silently folded in",
-  );
+  assert.equal(r.unstampedHeartbeats, 0, "nothing should be resolved by date");
+  assert.equal(r.inexactIntervalHeartbeats, 0, "no interval should be estimated");
+});
 
-  // In this fixture the Mathematica heartbeats land mid-session behind a stamped
-  // VS Code head, so no interval is actually estimated — the fallback costs nothing
-  // here. That is the normal case, and it is why the two counters are separate.
-  assert.equal(r.inexactIntervalHeartbeats, 0);
+test("the date fallback still works for heartbeats that arrive unstamped", () => {
+  // Backfilling closed the gap for existing data, but the fallback must keep
+  // working: a tracker could still be misconfigured, and losing the heartbeat
+  // would be worse than estimating it.
+  const stripped = fixture.heartbeats.map(({ configVersion, ...rest }) => rest);
 
-  // Force the other case: the same heartbeats alone must still compute, using the
-  // date fallback for their head, and must report the estimate.
-  const alone = computeDurations(mathematica);
-  assert.ok(alone.totalMs > 0, "the fallback must produce a number, not throw");
-  assert.ok(alone.inexactIntervalHeartbeats > 0, "an estimated session head must be reported");
+  const r = computeDurations(stripped, { range: fixture.range, timeZone: fixture.timeZone });
+  assert.ok(r.totalMs > 0, "the fallback must produce a number, not throw");
+  assert.ok(r.unstampedHeartbeats > 0, "unstamped heartbeats must stay visible in the result");
+  assert.ok(r.inexactIntervalHeartbeats > 0, "estimated session heads must be reported");
+});
+
+test("Mathematica shares the VS Code regime timeline", () => {
+  // This alignment is why CONFIG_REGISTRY can stay one linear series instead of
+  // becoming per-tracker. If a Mathematica heartbeat ever disagrees with the regime
+  // its timestamp falls in, that assumption has broken.
+  for (const h of fixture.heartbeats.filter((x) => x.editor === "Mathematica")) {
+    const byDate = resolveInterval({ timestamp: h.timestamp });
+    assert.equal(
+      h.configVersion,
+      byDate.version,
+      `Mathematica heartbeat at ${h.timestamp} is stamped v${h.configVersion} but its timestamp falls in v${byDate.version}`,
+    );
+  }
 });
 
 test("the config registry is contiguous, ordered, and open-ended at the tail", () => {

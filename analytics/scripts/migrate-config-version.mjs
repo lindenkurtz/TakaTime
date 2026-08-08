@@ -24,15 +24,25 @@ import { connect, resolveUri, safeUri, LOGS, CONFIGS, MIGRATIONS } from "./_mong
 const MIGRATION_ID = "v3_config_version_backfill";
 
 /**
- * Heartbeats from this editor are deliberately NOT stamped.
+ * Every editor is stamped by regime window.
  *
- * The Mathematica tracker is a separate setup with its own (undocumented) throttle
- * behaviour. Stamping it with a VS Code config version would assert something we do
- * not know to be true. Leaving `configVersion` absent makes the algorithm fall back
- * to date resolution AND surface the record in `inexactIntervalHeartbeats`, so the
- * estimate stays visible instead of masquerading as fact. See METHODOLOGY.md.
+ * The Mathematica tracker was previously excluded, because its throttle history was
+ * unknown and stamping it with a VS Code config version would have asserted something
+ * not known to be true. Its source now lives in trackers/mathematica/, and the data
+ * confirms it shared the VS Code regime timeline exactly:
+ *
+ *   duration=120  in the v1 window  (51 heartbeats, 2026-04-13 .. 04-23)
+ *   duration=300  in the v2 window  (51 heartbeats, 2026-04-23 .. 08-08)
+ *   duration=30   on 2026-05-21     ( 9 heartbeats, a brief experiment)
+ *
+ * So one linear registry covers both trackers, and no per-tracker keying is needed.
+ *
+ * The nine 30-second heartbeats are stamped v2 along with the rest of their window.
+ * They sit inside a single session, so the worst case is one session head credited
+ * 300s instead of 30s — 270 seconds, once, across the entire history. A fourth
+ * regime for a one-off experiment would cost more clarity than it buys accuracy.
  */
-const UNMIGRATED_EDITORS = ["Mathematica"];
+const UNMIGRATED_EDITORS = [];
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -108,11 +118,13 @@ async function main() {
       }
     }
 
-    const skipped = await logs.countDocuments({
-      configVersion: { $exists: false },
-      editor: { $in: UNMIGRATED_EDITORS },
-    });
-    console.log(`   ${skipped} heartbeats intentionally left unstamped (editor in ${UNMIGRATED_EDITORS.join(", ")})`);
+    if (UNMIGRATED_EDITORS.length > 0) {
+      const skipped = await logs.countDocuments({
+        configVersion: { $exists: false },
+        editor: { $in: UNMIGRATED_EDITORS },
+      });
+      console.log(`   ${skipped} heartbeats intentionally left unstamped (editor in ${UNMIGRATED_EDITORS.join(", ")})`);
+    }
 
     const orphans = await logs.countDocuments({
       configVersion: { $exists: false },

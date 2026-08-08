@@ -90,11 +90,15 @@ It is the single source of truth for the config registry.
 { version, intervalSeconds, scope, from, to }
 ```
 
-## Known gaps
+## Trackers
 
-A separate Mathematica tracker writes heartbeats with `editor: "Mathematica"` from
-outside this repo. Those records carry no `configVersion` and their durations are
-estimated. See [METHODOLOGY.md](METHODOLOGY.md#known-gaps).
+| Tracker | Source | Writes via |
+|---|---|---|
+| VS Code | [`vscodePlugin/Takatime/`](vscodePlugin/Takatime/) | `taka-upload` (Go) |
+| Mathematica | [`trackers/mathematica/`](trackers/mathematica/) | pymongo, direct |
+
+Both share the same throttle regime timeline, which is why the config registry is a
+single linear series. See [METHODOLOGY.md](METHODOLOGY.md#trackers).
 
 ## License
 

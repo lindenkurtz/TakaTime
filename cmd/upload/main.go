@@ -47,16 +47,14 @@ func main() {
 
 	// -configVersion is OPTIONAL on purpose.
 	//
-	// This binary is also invoked by trackers that live outside this repo — notably
-	// the Mathematica setup, which has its own throttle behaviour and is not part of
-	// the config registry. Requiring the flag would silently kill those heartbeats
-	// (callers spawn this process fire-and-forget with stdio discarded, so a
-	// log.Fatalln would go unseen).
+	// Callers spawn this process fire-and-forget with stdio discarded, so a
+	// log.Fatalln here would be silent data loss rather than a visible error.
+	// Requiring the flag would turn any misconfigured caller into lost heartbeats.
 	//
 	// When absent, `omitempty` leaves configVersion off the document entirely and the
 	// query-time algorithm resolves the interval by date instead, reporting the
-	// heartbeat as estimated. That is the documented Mathematica gap — see
-	// METHODOLOGY.md — and it is strictly better than dropping the data.
+	// heartbeat as estimated — strictly better than dropping the data.
+	// See METHODOLOGY.md.
 	if *configVersion <= 0 {
 		log.Printf("No -configVersion given; heartbeat will be stored unstamped and interpreted by date.")
 	}

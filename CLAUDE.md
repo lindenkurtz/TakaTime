@@ -100,25 +100,35 @@ Mongo URI resolution order: `--uri` flag, `$TAKATIME_MONGO_URI` / `$MONGO_URI`, 
   when the machine ran in UTC) and is ignored in favour of `timestamp`.
 - Calibration must stay within ±10% on the 7-day total. The test fails otherwise.
 
-## Known gap: the Mathematica tracker
+## Two trackers, one regime timeline
 
-A separate setup writes heartbeats with `editor: "Mathematica"` from **outside this
-repo**. Those records carry no `configVersion` and are deliberately left unstamped by
-the migration — stamping them with a VS Code regime would assert something not known
-to be true.
+| Tracker | Source | Writes via | Editor field |
+|---|---|---|---|
+| VS Code | `vscodePlugin/Takatime/` | `taka-upload` (Go) | `VsCode` |
+| Mathematica | `trackers/mathematica/` | pymongo, direct | `Mathematica` |
 
-Consequences:
+Both share the same config regimes on the same boundaries — verified against the data,
+and asserted by the test `Mathematica shares the VS Code regime timeline`. **That
+alignment is load-bearing:** it is the only reason `CONFIG_REGISTRY` can be a single
+linear series. If the trackers ever diverge, the registry must become per-tracker,
+which is a schema change — ask first.
 
-- `-configVersion` is **optional** on `taka-upload` on purpose. Callers spawn it
-  fire-and-forget with stdio discarded, so requiring it would be silent data loss.
-- Mathematica durations are estimated via the date fallback, and surface in
-  `unstampedHeartbeats` / `inexactIntervalHeartbeats` rather than being folded in
-  silently.
-- WakaTime never saw Mathematica, so any calibration against it must filter to
-  `editor === "VsCode"`.
+Changing the Mathematica throttle means updating three constants together:
+`$TakatimeInterval` (`TakatimePalette.wl`), `CONFIG_VERSION`
+(`takatime_mathematica.py`), and the open regime in `CONFIG_REGISTRY`.
 
-Closing this gap requires making `CONFIG_REGISTRY` per-tracker rather than a single
-linear series — a schema change, so ask first.
+Every heartbeat currently carries a `configVersion`. The date fallback is still
+supported and tested, because `-configVersion` is deliberately **optional** on
+`taka-upload` — callers spawn it fire-and-forget with stdio discarded, so requiring it
+would turn a misconfigured caller into silent data loss.
+
+WakaTime never observed Mathematica, so calibration must filter to
+`editor === "VsCode"` regardless of stamping.
+
+**Never hardcode the Mongo URI.** `trackers/mathematica/takatime_mathematica.py` used
+to carry the connection string — password included — as a literal. It now resolves
+from `$TAKATIME_MONGO_URI` / `$MONGO_URI` / `~/.takatime.json`, matching
+`analytics/scripts/_mongo.mjs`. Keep it that way; this repo is pushed to GitHub.
 
 ## Style
 
