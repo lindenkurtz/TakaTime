@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/Rtarun3606k/TakaTime/internal/types"
+	"github.com/lindenkurtz/TakaTime/internal/types"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -43,8 +43,8 @@ func (m Model) generateAboutContent() string {
 	resourcesHeading := headingStyle.Render("Resources")
 
 	// Assuming you have the MakeLink helper we built earlier!
-	github := MakeLink("https://github.com/Rtarun3606k/TakaTime", "GitHub Repository")
-	issues := MakeLink("https://github.com/Rtarun3606k/TakaTime/issues", "Report a Bug")
+	github := MakeLink("https://github.com/lindenkurtz/TakaTime", "GitHub Repository")
+	issues := MakeLink("https://github.com/lindenkurtz/TakaTime/issues", "Report a Bug")
 	// discord := MakeLink("https://discord.gg/YOUR_LINK", "Discord Server")
 
 	linksText := fmt.Sprintf("%s  •  %s  ", github, issues)
@@ -53,7 +53,7 @@ func (m Model) generateAboutContent() string {
 	// --- SECTION 4: LICENSE & CREDITS ---
 	licenseHeading := headingStyle.Render("License")
 	license := subTextStyle.Render("Distributed under the MIT License.\nFree and open-source forever.")
-	author := subTextStyle.MarginTop(2).Render("Built with ❤️  by Rtarun3606k")
+	author := subTextStyle.MarginTop(2).Render("Originally by Rtarun3606k — fork by lindenkurtz")
 
 	// --- ASSEMBLE EVERYTHING ---
 	// Stack all the sections vertically, perfectly centered

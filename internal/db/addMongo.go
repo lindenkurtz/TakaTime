@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/Rtarun3606k/TakaTime/internal/types"
+	"github.com/lindenkurtz/TakaTime/internal/types"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )

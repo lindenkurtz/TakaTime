@@ -7,16 +7,35 @@ import (
 
 var DB *sql.DB
 
+// LogEntry is one heartbeat: an OBSERVATION that a file was being edited at an
+// instant. It is deliberately not a duration. See METHODOLOGY.md.
 type LogEntry struct {
 	FileName  string    `bson:"name"`
 	Project   string    `bson:"project"`
 	TimeStamp time.Time `bson:"timestamp"`
-	Duration  float64   `bson:"duration"`
 	Date      string    `bson:"date"`
 	Language  string    `bson:"language"`
 	Os        string    `bson:"os"`
 	GitBranch string    `bson:"gitBranch"`
 	Editor    string    `bson:"editor"`
+
+	// ConfigVersion identifies which tracker config regime produced this heartbeat,
+	// so the query-time algorithm can resolve the throttle interval without guessing.
+	// Must match an entry in the config registry (analytics/duration.mjs + the
+	// `configs` collection). omitempty keeps it off records written before v3.
+	ConfigVersion int `bson:"configVersion,omitempty"`
+
+	// Duration is RETIRED as of config regime v3 (2026-08-09) and is never written
+	// any more. It only ever held the throttle interval frozen at write time, which
+	// made it an interpretation baked into the raw log rather than a measurement —
+	// and it silently went wrong whenever the throttle changed.
+	//
+	// The field survives here purely so that pre-v3 records still round-trip through
+	// the offline SQLite queue. omitempty means a zero value is omitted from the
+	// BSON document entirely, so new heartbeats carry no `duration` key at all.
+	//
+	// DO NOT SUM THIS FIELD. Use analytics/duration.mjs.
+	Duration float64 `bson:"duration,omitempty"`
 }
 
 type StatItem struct {

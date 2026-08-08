@@ -27,7 +27,7 @@ function showDashboard(context) {
 
     if (!fs.existsSync(binaryPath)) {
       vscode.window.showErrorMessage(
-        "TakaTime: Dashboard binary missing. Please run the Update Binaries command.",
+        `TakaTime: Dashboard binary ${binName} not found. Build it from the repo: ./scripts/build-binaries.sh`,
       );
       return;
     }

@@ -18,9 +18,8 @@ function checkStatus(statusBar) {
     //  Updated to checkBinaries (plural)
     const areBinariesReady = env.checkBinaries(env.CURRENT_VERSION);
     if (!areBinariesReady) {
-      statusBar.text = "$(cloud-download) TakaTime: Binaries Missing";
-      statusBar.tooltip =
-        "Core binaries missing. Please run 'TakaTime: Update Binaries'.";
+      statusBar.text = "$(tools) TakaTime: Binaries Missing";
+      statusBar.tooltip = `Binaries for ${env.CURRENT_VERSION} are not installed. Build them from the repo: ./scripts/build-binaries.sh`;
       statusBar.backgroundColor = undefined; // Reset color
       return;
     }

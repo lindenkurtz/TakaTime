@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	persnalization "github.com/Rtarun3606k/TakaTime/internal/Persnalization"
-	"github.com/Rtarun3606k/TakaTime/internal/Styles"
-	"github.com/Rtarun3606k/TakaTime/internal/types"
+	persnalization "github.com/lindenkurtz/TakaTime/internal/Persnalization"
+	"github.com/lindenkurtz/TakaTime/internal/Styles"
+	"github.com/lindenkurtz/TakaTime/internal/types"
 	"github.com/charmbracelet/lipgloss"
 )
 

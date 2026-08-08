@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/Rtarun3606k/TakaTime/internal/types"
+	"github.com/lindenkurtz/TakaTime/internal/types"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )

@@ -35,6 +35,6 @@ func GenerateOutput() string {
 	sb.WriteString("</p>\n\n")
 	//----------trial
 	// 3. Footer
-	sb.WriteString("<p align=\"center\"><em>Generated automatically by <a href=\"https://github.com/Rtarun3606k/TakaTime\">TakaTime</a></em></p>")
+	sb.WriteString("<p align=\"center\"><em>Generated automatically by <a href=\"https://github.com/lindenkurtz/TakaTime\">TakaTime</a></em></p>")
 	return sb.String()
 }

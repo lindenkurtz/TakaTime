@@ -1,4 +1,4 @@
-module github.com/Rtarun3606k/TakaTime
+module github.com/lindenkurtz/TakaTime
 
 go 1.25.3
 
@@ -6,12 +6,7 @@ require (
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/fogleman/gg v1.3.0
-	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0
-	github.com/google/go-github/v57 v57.0.0
 	go.mongodb.org/mongo-driver/v2 v2.4.1
-	golang.org/x/image v0.35.0
-	golang.org/x/oauth2 v0.34.0
 	modernc.org/sqlite v1.44.3
 )
 
@@ -27,7 +22,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/golang/snappy v1.0.0 // indirect
-	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.16.7 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect

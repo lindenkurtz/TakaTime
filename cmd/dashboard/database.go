@@ -5,9 +5,9 @@ import (
 	"log"
 	"time"
 
-	dbqueryv2 "github.com/Rtarun3606k/TakaTime/internal/DBQueryV2"
-	"github.com/Rtarun3606k/TakaTime/internal/db"
-	"github.com/Rtarun3606k/TakaTime/internal/types"
+	dbqueryv2 "github.com/lindenkurtz/TakaTime/internal/DBQueryV2"
+	"github.com/lindenkurtz/TakaTime/internal/db"
+	"github.com/lindenkurtz/TakaTime/internal/types"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 

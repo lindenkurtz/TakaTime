@@ -54,7 +54,7 @@ func (m Model) View() string {
 	//  Create the clickable ANSI strings
 
 	//Todo
-	githubLink := MakeLink("https://github.com/Rtarun3606k/TakaTime", "GitHub: Rtarun3606k")
+	githubLink := MakeLink("https://github.com/lindenkurtz/TakaTime", "GitHub: lindenkurtz/TakaTime")
 	// discordLink := MakeLink("https://discord.gg/YOUR_DISCORD_LINK", "Discord: TakaTime") // Replace with actual link!
 
 	// Combine them with your pipe separator

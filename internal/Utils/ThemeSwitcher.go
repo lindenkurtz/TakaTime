@@ -1,6 +1,6 @@
 package utils
 
-import "github.com/Rtarun3606k/TakaTime/internal/types"
+import "github.com/lindenkurtz/TakaTime/internal/types"
 
 func ThemeSwitcher(themeFlag string) types.ThemeConfig {
 	var theme types.ThemeConfig

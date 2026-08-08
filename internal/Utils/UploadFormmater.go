@@ -3,7 +3,7 @@ package utils
 import (
 	"strings"
 
-	"github.com/Rtarun3606k/TakaTime/internal/types"
+	"github.com/lindenkurtz/TakaTime/internal/types"
 )
 
 func FormmatUpload(token string, repoURL string, path string, branch string, commitMsg string) (types.UploadStruct, error) {

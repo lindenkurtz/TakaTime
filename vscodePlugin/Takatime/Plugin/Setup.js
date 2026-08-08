@@ -1,11 +1,16 @@
 // Plugin/Setup.js
 const vscode = require("vscode");
 const env = require("./Config");
-const downloader = require("./BinaryDownload");
 const statusHelper = require("./StatusBarUpdate"); // Renamed file
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+
+// Binaries are built from source in this repo, not downloaded.
+// This fork's versions are never published to upstream's releases page, which is
+// what the old BinaryDownload.js fetched from — it could only ever install a
+// version older than the extension asking for it.
+const BUILD_COMMAND = "./scripts/build-binaries.sh";
 
 async function runSetup(statusBar) {
   const config = env.getConfig() || {};
@@ -37,19 +42,16 @@ async function runSetup(statusBar) {
     return;
   }
 
-  // Check & Download Binary
+  // Check binaries. We do not download them — they are built from source.
   const isBinaryReady = env.checkBinaries(newConfig.VERSION);
   if (!isBinaryReady) {
-    try {
-      const success = await downloader.ensureBinaries(newConfig.VERSION);
-      if (success) {
-        vscode.window.showInformationMessage(
-          `TakaTime ${newConfig.VERSION} installed successfully! You can start coding to see it in action.`,
-        );
-      }
-    } catch (err) {
-      vscode.window.showErrorMessage(`Download Failed: ${err.message}`);
-      return;
+    const choice = await vscode.window.showWarningMessage(
+      `TakaTime ${newConfig.VERSION} binaries are not installed. Build them from the repo with "${BUILD_COMMAND}".`,
+      "Copy Command",
+    );
+    if (choice === "Copy Command") {
+      await vscode.env.clipboard.writeText(BUILD_COMMAND);
+      vscode.window.showInformationMessage(`Copied: ${BUILD_COMMAND}`);
     }
   }
 

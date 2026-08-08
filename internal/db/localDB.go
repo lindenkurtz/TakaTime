@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Rtarun3606k/TakaTime/internal/types"
+	"github.com/lindenkurtz/TakaTime/internal/types"
 	_ "modernc.org/sqlite"
 )
 

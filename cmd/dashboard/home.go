@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	persnalization "github.com/Rtarun3606k/TakaTime/internal/Persnalization"
-	"github.com/Rtarun3606k/TakaTime/internal/Styles"
-	utils "github.com/Rtarun3606k/TakaTime/internal/Utils"
-	"github.com/Rtarun3606k/TakaTime/internal/types"
+	persnalization "github.com/lindenkurtz/TakaTime/internal/Persnalization"
+	"github.com/lindenkurtz/TakaTime/internal/Styles"
+	utils "github.com/lindenkurtz/TakaTime/internal/Utils"
+	"github.com/lindenkurtz/TakaTime/internal/types"
 	"github.com/charmbracelet/lipgloss"
 )
 

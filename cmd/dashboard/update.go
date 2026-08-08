@@ -1,10 +1,10 @@
 package main
 
 import (
-	"github.com/Rtarun3606k/TakaTime/internal/Styles"
-	utils "github.com/Rtarun3606k/TakaTime/internal/Utils"
-	"github.com/Rtarun3606k/TakaTime/internal/db"
-	"github.com/Rtarun3606k/TakaTime/internal/types"
+	"github.com/lindenkurtz/TakaTime/internal/Styles"
+	utils "github.com/lindenkurtz/TakaTime/internal/Utils"
+	"github.com/lindenkurtz/TakaTime/internal/db"
+	"github.com/lindenkurtz/TakaTime/internal/types"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"

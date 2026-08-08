@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Rtarun3606k/TakaTime/internal/Styles"
-	"github.com/Rtarun3606k/TakaTime/internal/types"
+	"github.com/lindenkurtz/TakaTime/internal/Styles"
+	"github.com/lindenkurtz/TakaTime/internal/types"
 	"github.com/charmbracelet/lipgloss"
 )
 

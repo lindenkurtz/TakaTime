@@ -1,7 +1,7 @@
 package Styles
 
 import (
-	"github.com/Rtarun3606k/TakaTime/internal/types"
+	"github.com/lindenkurtz/TakaTime/internal/types"
 	"github.com/charmbracelet/lipgloss"
 )
 

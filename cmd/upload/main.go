@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"time"
 
-	utils "github.com/Rtarun3606k/TakaTime/internal/Utils"
-	"github.com/Rtarun3606k/TakaTime/internal/db"
-	"github.com/Rtarun3606k/TakaTime/internal/debugger"
-	"github.com/Rtarun3606k/TakaTime/internal/types"
+	utils "github.com/lindenkurtz/TakaTime/internal/Utils"
+	"github.com/lindenkurtz/TakaTime/internal/db"
+	"github.com/lindenkurtz/TakaTime/internal/debugger"
+	"github.com/lindenkurtz/TakaTime/internal/types"
 )
 
 // pes2ug23cs645
@@ -19,10 +19,15 @@ func main() {
 	uri := flag.String("uri", "", "MongoDB Atlas Connection URI")
 	project := flag.String("project", "unknown", "Project Name")
 	file := flag.String("file", "", "File Name")
-	duration := flag.Float64("duration", 0, "Duration in seconds")
 	language := flag.String("language", "unknown", "Lnaguage")
 	editor := flag.String("editor", "unknown", "Editor Name NeoVim/VsCode")
+	configVersion := flag.Int("configVersion", 0, "Tracker config regime that produced this heartbeat")
 	versionFlag := flag.Bool("version", false, "show Version")
+
+	// DEPRECATED. Accepted so that older plugins still run against this binary, but
+	// the value is discarded: a heartbeat records an observation, not a duration.
+	// Durations are computed at query time from timestamps. See METHODOLOGY.md.
+	duration := flag.Float64("duration", 0, "DEPRECATED — ignored; durations are derived at query time")
 
 	flag.Parse()
 
@@ -31,9 +36,29 @@ func main() {
 		return
 	}
 
-	if *uri == "" || *duration <= 0 {
-		log.Fatalln("Arguments are empty MongoDB URI or Duration is less than 0")
+	if *duration > 0 {
+		log.Printf("Ignoring deprecated -duration=%v; durations are computed at query time.", *duration)
+	}
+
+	if *uri == "" {
+		log.Fatalln("Argument -uri is required (MongoDB connection URI)")
 		return
+	}
+
+	// -configVersion is OPTIONAL on purpose.
+	//
+	// This binary is also invoked by trackers that live outside this repo — notably
+	// the Mathematica setup, which has its own throttle behaviour and is not part of
+	// the config registry. Requiring the flag would silently kill those heartbeats
+	// (callers spawn this process fire-and-forget with stdio discarded, so a
+	// log.Fatalln would go unseen).
+	//
+	// When absent, `omitempty` leaves configVersion off the document entirely and the
+	// query-time algorithm resolves the interval by date instead, reporting the
+	// heartbeat as estimated. That is the documented Mathematica gap — see
+	// METHODOLOGY.md — and it is strictly better than dropping the data.
+	if *configVersion <= 0 {
+		log.Printf("No -configVersion given; heartbeat will be stored unstamped and interpreted by date.")
 	}
 
 	//setup debugger logs
@@ -68,16 +93,18 @@ func main() {
 		gitBranch = ""
 	}
 
+	// Duration is intentionally not set — it is retired as of config regime v3, and
+	// `omitempty` keeps the key off the document entirely. `timestamp` is the record.
 	entry := types.LogEntry{
-		FileName:  *file,
-		Project:   *project,
-		Duration:  *duration,
-		TimeStamp: time.Now(),
-		Date:      time.Now().Format("2006-01-02"),
-		Language:  *language,
-		Os:        utils.GetOS(),
-		GitBranch: gitBranch,
-		Editor:    *editor,
+		FileName:      *file,
+		Project:       *project,
+		TimeStamp:     time.Now(),
+		Date:          time.Now().Format("2006-01-02"),
+		Language:      *language,
+		Os:            utils.GetOS(),
+		GitBranch:     gitBranch,
+		Editor:        *editor,
+		ConfigVersion: *configVersion,
 	}
 
 	// _, err = collection.InsertOne(ctx, entry)
