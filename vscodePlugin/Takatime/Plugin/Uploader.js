@@ -9,8 +9,9 @@ const env = require("./Config");
  * Prepares the arguments for the Go binary
  * @param {vscode.TextDocument} document
  * @param {string} mongoUri - We need to pass this explicitly now
+ * @param {number} configVersion - Tracker config regime in force for this heartbeat
  */
-function getGoArgs(document, mongoUri) {
+function getGoArgs(document, mongoUri, configVersion) {
   const filePath = document.fileName;
   const language = document.languageId || "unknown"; // VS Code knows the language!
 
@@ -21,7 +22,13 @@ function getGoArgs(document, mongoUri) {
     projectName = workspaceFolder.name;
   }
 
-  // 📦 CORRECTED FLAGS (Based on your help output)
+  // NOTE: `-duration` is deliberately NOT passed any more.
+  //
+  // A heartbeat is an observation, not a duration. The old flag wrote the throttle
+  // interval into every record as if it were measured time, which silently broke
+  // when the throttle changed. Durations are now derived at query time from
+  // timestamps (see analytics/duration.mjs), and `-configVersion` is what lets that
+  // computation know which throttle produced this record.
   return [
     "-file",
     filePath,
@@ -31,8 +38,8 @@ function getGoArgs(document, mongoUri) {
     language,
     "-uri",
     mongoUri, // Passing URI as flag (required by your binary)
-    "-duration",
-    "300", // Sending a default heartbeat duration (optional, fixes "less than 0" error)
+    "-configVersion",
+    String(configVersion),
     "-editor",
     "VsCode",
     // "Antigravity",
@@ -42,8 +49,9 @@ function getGoArgs(document, mongoUri) {
 /**
  * Spawns the binary in the background
  * @param {vscode.TextDocument} document
+ * @param {number} configVersion
  */
-function spawnProcess(document) {
+function spawnProcess(document, configVersion) {
   const config = env.getConfig();
   if (!config || !config.MONGO_URI) return;
 
@@ -58,6 +66,9 @@ function spawnProcess(document) {
   const binaryPath = path.join(homeDir, ".takatime", "bin", binName);
 
   if (!fs.existsSync(binaryPath)) {
+    // Expected right after a version bump, until the matching binary is installed.
+    // Failing closed is deliberate: a v2.2.x binary does not understand
+    // -configVersion and would reject the whole invocation anyway.
     console.warn(
       `TakaTime: Binary not found at ${binaryPath}, skipping upload.`,
     );
@@ -67,7 +78,7 @@ function spawnProcess(document) {
   // 2. Spawn (Fire & Forget)
   try {
     // We pass 'config.MONGO_URI' to our helper now
-    const args = getGoArgs(document, config.MONGO_URI);
+    const args = getGoArgs(document, config.MONGO_URI, configVersion);
 
     const child = spawn(binaryPath, args, {
       detached: !isWin,

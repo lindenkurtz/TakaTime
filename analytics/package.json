@@ -1,0 +1,25 @@
+{
+  "name": "takatime-analytics",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Query-time duration algorithm, calibration fixtures, and data-maintenance scripts for TakaTime.",
+  "license": "MIT",
+  "main": "duration.mjs",
+  "exports": {
+    ".": "./duration.mjs"
+  },
+  "scripts": {
+    "test": "node --test 'test/*.test.mjs'",
+    "migrate": "node scripts/migrate-config-version.mjs",
+    "migrate:apply": "node scripts/migrate-config-version.mjs --apply",
+    "build-fixture": "node scripts/build-fixture.mjs",
+    "export": "node scripts/export-bundle.mjs"
+  },
+  "dependencies": {
+    "mongodb": "^6.12.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -19,3 +19,8 @@ nvim_logs.txt
 internal.txt
 .version
 taka-das*
+
+# Analytics: node deps and generated export bundles.
+# The calibration fixture under analytics/fixtures/ IS checked in on purpose.
+analytics/node_modules/
+exports/
