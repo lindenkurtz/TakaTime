@@ -20,6 +20,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const fixture = JSON.parse(
   fs.readFileSync(path.join(HERE, "..", "fixtures", "calibration-2026-08.json"), "utf8"),
 );
+/** Dense real v1 heartbeats, for downsampling. See section 4. */
+const burst = JSON.parse(
+  fs.readFileSync(path.join(HERE, "..", "fixtures", "invariance-2026-04.json"), "utf8"),
+);
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                     */
@@ -48,6 +52,41 @@ function evenly(startIso, spanSeconds, everySeconds, extra = {}) {
   const out = [];
   for (let s = 0; s <= spanSeconds; s += everySeconds) out.push(hb(t0 + s * S, extra));
   return out;
+}
+
+/**
+ * Simulate a GLOBAL throttle of `intervalSeconds` watching the same underlying
+ * activity: emit a heartbeat only once `intervalSeconds` have elapsed since the
+ * last one emitted.
+ *
+ * Thinning a fine-grained real stream is the only honest way to get two regimes
+ * observing IDENTICAL activity — April cannot be re-run at 300s. It only works
+ * downward: a stream can be coarsened, never refined, which is why this uses the
+ * dense v1 per-file era rather than the v2 calibration fixture.
+ */
+function downsample(heartbeats, intervalSeconds) {
+  const out = [];
+  let last = -Infinity;
+  for (const h of heartbeats) {
+    const t = Date.parse(h.timestamp);
+    if (t - last >= intervalSeconds * S) {
+      out.push({ ...h, configVersion: 1 });
+      last = t;
+    }
+  }
+  return out;
+}
+
+/** A registry with one open-ended regime, so head credit matches the simulation. */
+const soleRegime = (intervalSeconds) => [
+  { version: 1, intervalSeconds, scope: "global", from: "2026-01-01T00:00:00.000Z", to: null },
+];
+
+/** Attributed seconds for `heartbeats` re-observed at `intervalSeconds`. */
+function atThrottle(heartbeats, intervalSeconds) {
+  return computeDurations(downsample(heartbeats, intervalSeconds), {
+    configs: soleRegime(intervalSeconds),
+  });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -234,8 +273,14 @@ test("a gap is credited to the earlier heartbeat, not the later one", () => {
 /* 4. Config invariance — the point of the head credit                         */
 /* -------------------------------------------------------------------------- */
 
-test("config invariance: the same activity measured at 120s and 300s agrees closely", () => {
-  // Four hours of continuous work, observed by two different throttle regimes.
+test("config invariance (SYNTHETIC, weak): evenly spaced activity agrees to ~1%", () => {
+  // WEAK TEST. Kept because it pins the algebra, not because it is evidence.
+  //
+  // `evenly()` produces one unbroken session of uniformly spaced heartbeats, so
+  // both regimes reduce to exactly span + interval and the drift is forced to be
+  // (span+120)/(span+300)-1 no matter what the data looks like. Real activity is
+  // bursty, and burstiness is precisely what breaks the cancellation. The real
+  // measurement is the downsampling test below — trust that one.
   const spanSeconds = 4 * 3600;
 
   const fast = computeDurations(evenly("2026-09-01T09:00:00Z", spanSeconds, 120, { configVersion: 3 }));
@@ -259,6 +304,88 @@ test("config invariance: summing raw `duration` would NOT be invariant", () => {
   const fastSum = evenly("2026-09-01T09:00:00Z", spanSeconds, 120).length * 120;
   const slowSum = evenly("2026-09-01T09:00:00Z", spanSeconds, 300).length * 300;
   assert.notEqual(fastSum, slowSum);
+});
+
+test("config invariance (REAL DATA): downsampled bursty activity agrees within 6%", () => {
+  // THE ONE THAT COUNTS. Real April heartbeats (median gap ~53s) thinned into a
+  // 120s stream and a 300s stream — the two regimes the tracker actually runs, v3
+  // and v2 — describing the same underlying work.
+  const fast = atThrottle(burst.heartbeats, 120);
+  const slow = atThrottle(burst.heartbeats, 300);
+  const drift = pct(slow.totalSeconds, fast.totalSeconds);
+
+  console.log(
+    `    REAL 120s: ${formatDuration(fast.totalMs)} (n=${downsample(burst.heartbeats, 120).length}, ${fast.sessionCount} sessions)  ` +
+      `300s: ${formatDuration(slow.totalMs)} (n=${downsample(burst.heartbeats, 300).length}, ${slow.sessionCount} sessions)  (${drift >= 0 ? "+" : ""}${drift.toFixed(2)}%)`,
+  );
+
+  // Coarsening reads HIGH, not low: head credit grows faster than span shrinks.
+  // ~+4.7% as measured. The gate is 6% — tight enough to catch a regression,
+  // loose enough to survive a fixture refresh. See METHODOLOGY.md.
+  assert.ok(
+    Math.abs(drift) <= 6,
+    `real-data invariance drifted ${drift.toFixed(2)}% between the 120s and 300s regimes (limit ±6%)`,
+  );
+});
+
+test("the synthetic invariance figure is optimistic about real data", () => {
+  // Guards the honesty of the claim itself: if someone re-derives invariance from
+  // the synthetic test alone, they will quote a number several times too good.
+  const spanSeconds = 4 * 3600;
+  const synthetic = Math.abs(
+    pct(
+      computeDurations(evenly("2026-09-01T09:00:00Z", spanSeconds, 300, { configVersion: 2 })).totalSeconds,
+      computeDurations(evenly("2026-09-01T09:00:00Z", spanSeconds, 120, { configVersion: 3 })).totalSeconds,
+    ),
+  );
+  const real = Math.abs(
+    pct(atThrottle(burst.heartbeats, 300).totalSeconds, atThrottle(burst.heartbeats, 120).totalSeconds),
+  );
+
+  console.log(`    synthetic drift ${synthetic.toFixed(2)}% vs real drift ${real.toFixed(2)}%`);
+  assert.ok(
+    real > synthetic * 2,
+    `real drift (${real.toFixed(2)}%) should materially exceed synthetic (${synthetic.toFixed(2)}%); ` +
+      `if this fails, the fixture may no longer be bursty enough to be a real test`,
+  );
+});
+
+test("invariance degrades monotonically as the throttle coarsens", () => {
+  // Establishes the shape of the error, so the ±6% gate above reads as a measured
+  // point on a curve rather than a magic constant.
+  const totals = [120, 180, 240, 300, 420, 600].map((iv) => ({
+    iv,
+    seconds: atThrottle(burst.heartbeats, iv).totalSeconds,
+  }));
+  const base = totals[0].seconds;
+  for (const row of totals) {
+    console.log(`    ${String(row.iv).padStart(3)}s -> ${formatDuration(row.seconds * S)}  (${((row.seconds / base - 1) * 100).toFixed(2)}%)`);
+  }
+  for (let i = 1; i < totals.length; i++) {
+    assert.ok(
+      totals[i].seconds >= totals[i - 1].seconds,
+      `coarsening from ${totals[i - 1].iv}s to ${totals[i].iv}s should not reduce attributed time`,
+    );
+  }
+});
+
+test("the legacy `duration` field errs in OPPOSITE directions per regime", () => {
+  // Why the all-time undercount (-9%) is so much milder than the calibration-week
+  // undercount (-17.5%): under per-file throttling every open file pinged on its
+  // own timer, so April's legacy sum is inflated, and the two errors partly cancel
+  // in any total that spans both eras. Comparing April to August on the legacy
+  // field is therefore wrong twice over.
+  const attributed = computeDurations(burst.heartbeats);
+  const legacy = burst.heartbeats.reduce((a, h) => a + (h.duration ?? 0), 0);
+  const drift = pct(legacy * S, attributed.totalMs);
+
+  console.log(
+    `    v1 per-file era: legacy ${formatDuration(legacy * S)} vs attributed ${formatDuration(attributed.totalMs)}  (${drift >= 0 ? "+" : ""}${drift.toFixed(1)}%)`,
+  );
+  assert.ok(
+    legacy * S > attributed.totalMs,
+    "under per-file throttling the legacy field is expected to OVERCOUNT, unlike the v2 era",
+  );
 });
 
 /* -------------------------------------------------------------------------- */

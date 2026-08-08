@@ -17,18 +17,46 @@ It never held measured time. It held the tracker's *throttle interval*, copied i
 every record at write time. That made it an interpretation baked into the raw log,
 and it is wrong in two independent ways:
 
-1. **It undercounts.** A throttle interval is a floor on the time a heartbeat
-   represents, not the time itself. Validated against WakaTime running in parallel
-   over 2026-08-02..08: WakaTime measured **8h17m**, summing `duration` gave
-   **6h50m** — a **17.5% undercount**.
+1. **Under global throttling it undercounts.** A throttle interval is a floor on the
+   time a heartbeat represents, not the time itself. Validated against WakaTime
+   running in parallel over 2026-08-02..08: WakaTime measured **8h17m**, summing
+   `duration` gave **6h50m** — a **17.5% undercount**.
 
 2. **It mixes incompatible regimes.** The throttle changed on 2026-04-23, from
    *120s per-file* to *300s global*. Under per-file throttling the tracker emitted a
    heartbeat for **every open file** every interval, so projects that keep many files
    open accumulated heartbeats far faster than projects that don't — without any
    more time actually passing. Language shares inherited that distortion:
-   JavaScript reads as **24.4%** of all heartbeats but only **12.5%** of attributed
+   JavaScript reads as **24.6%** of all heartbeats but only **12.8%** of attributed
    time.
+
+These compound rather than cancel, and the direction of the error depends on which
+era you are looking at — which is why the 17.5% above and the −9.4% all-time figure
+in [Current totals](#current-totals) are both correct.
+
+### It errs in opposite directions in different eras
+
+The two failures above do not point the same way, and the headline numbers in this
+document look contradictory until you see why.
+
+| Regime | Attributed | Sum of `duration` | Legacy field is |
+|---|---|---|---|
+| v1 — 120s **per-file** | 36h49m48s | 43h46m00s | **+18.8%** (over) |
+| v2 — 300s global | 86h00m57s | 67h34m30s | **−21.4%** (under) |
+| All time | 122h50m46s | 111h20m30s | −9.4% |
+
+Under per-file throttling every open file ran its own timer, so April's legacy sum
+is *inflated* — a file you were not touching still pinged every 120s. Under global
+throttling one timer covers the whole editor, and the interval is a floor, so the sum
+*undercounts*. A total spanning both eras nets a 40-point swing down to −9.4%, which
+is why the all-time undercount looks so much milder than the 17.5% measured on a
+v2-only week.
+
+**So the field is not merely wrong, it is wrong inconsistently.** Comparing April to
+August on `duration` is wrong twice over: both numbers are distorted, in opposite
+directions, and the comparison manufactures a drop that is entirely an artifact of
+the throttle change. Asserted by the test
+`the legacy duration field errs in OPPOSITE directions per regime`.
 
 The field is still present on historical records, and it is intentionally never
 edited or deleted. **The raw log is an observation record.** Rewriting it would
@@ -113,14 +141,58 @@ Without it, a session's duration would be `span(first, last)` — which silently
 the head of every session. The throttle had already been running for up to one full
 interval before the first heartbeat fired, and that time was real work.
 
-More importantly, **the credit is what makes the algorithm config-invariant.** When
-the throttle shortens, the first heartbeat of a session arrives *earlier* (so `span`
-grows) while the credit shrinks by roughly the same amount. The two effects cancel.
-The same four hours of work measured under a 120s throttle and a 300s throttle differ
-by 180 seconds — 1.2% — instead of by a factor of 2.5.
+More importantly, **the credit is what makes the algorithm approximately
+config-invariant.** When the throttle shortens, the first heartbeat of a session
+arrives *earlier* (so `span` grows) while the credit shrinks by roughly the same
+amount. The two effects largely cancel.
 
-This is verified directly by the test
-`config invariance: the same activity measured at 120s and 300s agrees closely`.
+**How well they cancel is measured, and it is not as good as the algebra suggests.**
+
+Take real April heartbeats — the v1 per-file era, median gap ~53s — and thin them
+into a 120s stream and a 300s stream, two regimes observing the same underlying work.
+Thinning only runs downward; a stream can be coarsened, never refined, which is why
+this uses the dense v1 era rather than the v2 calibration data.
+
+| Observed at | Heartbeats | Sessions | Attributed | vs 120s |
+|---|---|---|---|---|
+| 120s | 578 | 67 | 33h37m10s | — |
+| 180s | 426 | 67 | 34h13m26s | +1.80% |
+| 240s | 371 | 67 | 35h02m25s | +4.23% |
+| **300s** | 319 | 69 | **35h12m02s** | **+4.70%** |
+| 420s | 259 | 71 | 36h25m59s | +8.37% |
+| 600s | 210 | 81 | 38h12m11s | +13.63% |
+
+So **≈5%, not 1.2%**, between the two regimes the tracker actually runs — and
+directional: a coarser throttle reads *high*. The decomposition shows why the
+cancellation is only partial:
+
+```
+120s:  span 31h23m10s  +  head credit 2h14m00s (67 × 120s)  =  33h37m10s
+300s:  span 29h27m02s  +  head credit 5h45m00s (69 × 300s)  =  35h12m02s
+       span −1h56m08s     head credit +3h31m00s             =    +1h34m52s
+```
+
+Two things the idealised argument omits. First, a real session rarely begins one
+full interval before its first heartbeat — it begins whenever it begins — so a 300s
+head credit overshoots more often than a 120s one. Second, **session count is itself
+a function of the throttle**: coarsening pushes some gaps past `IDLE_TIMEOUT`, and
+each newly split session buys another whole head credit (67 → 69 → 71 → 81 as the
+interval grows).
+
+The 1.2% figure previously quoted here came from a synthetic test over perfectly
+evenly spaced heartbeats. That construction collapses to exactly one session of
+`span + interval`, so its drift is `(span+120)/(span+300)−1` regardless of the input
+— algebra, not evidence. It is retained as
+`config invariance (SYNTHETIC, weak)` to pin the arithmetic, and explicitly labelled
+weak. The claim you should trust is
+`config invariance (REAL DATA): downsampled bursty activity agrees within 6%`,
+with `the synthetic invariance figure is optimistic about real data` guarding against
+the weaker number being quoted again.
+
+**What this buys.** ≈5% across a 2.5× throttle change, against the legacy field's
+40-point swing across the same change. Config-invariance is a strong property here,
+just not an exact one — and it degrades as regimes grow further apart, so the
+registry should not be allowed to span wildly different intervals without re-testing.
 
 ### Attribution
 
@@ -148,9 +220,16 @@ dimensions, and again per-day.
 Each gap is attributed to the day of its **earlier** heartbeat, in an explicit IANA
 timezone — **America/Denver**, not UTC and not the viewer's local zone.
 
-A session that runs from 23:50 to 00:30 is therefore not split across two days: the
-gap belongs wholly to the day the earlier heartbeat fell in. Days remain a clean
-partition, which is what keeps per-day totals summing to the range total.
+Precisely: **each individual gap** is never split, but a **session** that straddles
+midnight is. A session running 23:50 → 00:30 stays one session — `IDLE_TIMEOUT` does
+not care about dates — but its *time* lands on both days, because heartbeats after
+midnight are themselves attribution points on the next day. Only the one gap that
+crosses the boundary is assigned whole, to the earlier heartbeat's day.
+
+That is what keeps days a clean partition: every contribution belongs to exactly one
+day, so per-day totals sum to the range total even when sessions span the cut. What
+is *not* guaranteed is that a session appears in a single day's bucket, and
+`session.day` reports where a session **started**, not everywhere it contributed.
 
 **Why an explicit zone:** UTC bucketing would cut the day at 18:00 local, splitting
 almost every evening session and making "hours per day" meaningless. The zone is a
@@ -240,8 +319,17 @@ the result rests on an assumption.
 
 Note the difference between those two counters. An unstamped heartbeat *in the middle
 of a session* costs nothing — only session heads consume an interval. So
-`inexactIntervalHeartbeats` (currently 22 across all history) is the number that
-actually bounds the error, and it is much smaller than `unstampedHeartbeats` (112).
+`inexactIntervalHeartbeats` is the number that actually bounds the error, and it is
+always much smaller than `unstampedHeartbeats`.
+
+**Both are currently zero, across all history.** Every heartbeat in the database
+carries a `configVersion`; nothing is resolved by date fallback. Before the
+Mathematica tracker was brought in-repo and backfilled, they stood at 112 and 22
+respectively — those were the only unstamped records, and they are the numbers an
+earlier draft of this document quoted. Verified against the live collection:
+`db.logs.countDocuments({ configVersion: { $exists: false } })` returns 0 of 2142,
+and the test `every heartbeat in the fixture is stamped` asserts both counters are
+zero.
 
 ---
 
@@ -266,8 +354,10 @@ the data confirms it followed the same regimes on the same boundaries:
 | 300s | v2 | 51 | 2026-04-23 .. 08-08 |
 | 30s | v2 | 9 | 2026-05-21 (experiment) |
 
-Every heartbeat in the database now carries a `configVersion`. Nothing is resolved by
-date fallback, and `unstampedHeartbeats` / `inexactIntervalHeartbeats` are both zero.
+Backfilling those records is what took `unstampedHeartbeats` and
+`inexactIntervalHeartbeats` to zero — see
+[Resolving a heartbeat's interval](#resolving-a-heartbeats-interval) for the current
+counts and what they bound.
 
 **Keeping them aligned is a maintenance obligation.** Three constants must agree:
 `$TakatimeInterval` in `TakatimePalette.wl`, `CONFIG_VERSION` in
@@ -309,7 +399,16 @@ running, and guessing its interval would hide a real deployment problem.
 
 Regression-tested against WakaTime, run in parallel on the same machine over the same
 week. Fixture: [`analytics/fixtures/calibration-2026-08.json`](analytics/fixtures/calibration-2026-08.json)
-— real heartbeats, checked in so the test needs no database access.
+— real heartbeats, checked in so the test needs no database access. (The second
+fixture, [`invariance-2026-04.json`](analytics/fixtures/invariance-2026-04.json),
+carries the dense v1 era used by the downsampling test above; it has no WakaTime
+ground truth and is not part of calibration.)
+
+Regenerate either with `npm run build-fixture -- --only calibration|invariance`.
+Refresh them **separately**: `groundTruth` is transcribed by hand from WakaTime's
+dashboard, so rebuilding calibration heartbeats on a day that is still accumulating
+compares fresh heartbeats against stale ground truth and manufactures drift that is
+not in the algorithm.
 
 WakaTime only ever observed VS Code, so the comparison filters to
 `editor === "VsCode"`. Comparing WakaTime against a total that includes Mathematica
@@ -329,9 +428,8 @@ For contrast, summing the legacy `duration` field over the same window gives
 **6h50m00s** — a **17.5%** undercount.
 
 **The test fails if the 7-day total drifts outside ±10%.** Individual days are
-checked at ±20%; single days are inherently noisier because a session that straddles
-midnight lands wholly in one day for TakaTime and may be split differently by
-WakaTime's own idle heuristics.
+checked at ±20%; single days are inherently noisier because TakaTime and WakaTime
+divide a midnight-straddling session by different idle heuristics.
 
 Run it:
 
@@ -339,29 +437,116 @@ Run it:
 cd analytics && npm test
 ```
 
+### How settled these numbers actually are
+
+Not very. The calibration is the best evidence available, and it is thin. Read the
++0.27% as *"nothing is badly wrong"*, not as *"the parameters are correct to a third
+of a percent."* Four specific weaknesses:
+
+**One day carries the week.** 2026-08-07 is 5h46m of the 8h17m ground truth — **70%
+of it**. `IDLE_TIMEOUT = 900` is fitted mostly against a single heavy session day, and
+a day that heavy is exactly the shape that constrains an idle timeout least.
+
+**A range of timeouts passes.** 900s is not identified by the data; it is the
+WakaTime-compatible default, and it happens to land best:
+
+| `IDLE_TIMEOUT` | 7-day total | Drift | ±10% gate |
+|---|---|---|---|
+| 600s | 7h31m55s | −9.07% | passes |
+| 720s | 7h37m56s | −7.86% | passes |
+| **900s** | **8h18m20s** | **+0.27%** | passes |
+| 1200s | 8h43m17s | +5.29% | passes |
+| 1500s | 9h15m41s | +11.81% | fails |
+
+Anything from roughly 600s to 1200s survives the gate. **Treat 900s as provisional** —
+a defensible default that one week of data failed to rule out, not a fitted constant.
+
+**The headline agreement is partly cancellation.** The +0.27% total is the residue of
+errors that happen to offset: −864s on 08-06, +317s on 08-07, +8s on 08-08, and
++620s on days with no ground truth at all. Day-level agreement is meaningfully worse
+than the total implies.
+
+**Ground truth covers 3 of the 5 active days.** WakaTime's `daySeconds` enumerates
+08-06, 08-07 and 08-08 (27656s), but its range total is 29820s — the missing 2164s
+fell on 08-04 and 08-05, where TakaTime attributes 2784s. Those days are inside the
+±10% total check but escape the ±20% per-day check entirely.
+
+Fresh WakaTime data covering more days — especially several moderate ones rather than
+one heavy one — is the single highest-value thing that could firm this up.
+
+### Nothing has validated v3 yet
+
+**All calibration above is v2 (300s) data.** As of this writing the database contains
+**zero v3 heartbeats** — the regime opens at `2026-08-09T06:00:00Z`, which has not
+arrived. Everything this document says about the 120s regime is therefore a
+*prediction*, resting on the real-data invariance measurement rather than on
+observation.
+
+The concrete prediction: because coarser throttles read high, **v3 totals should run
+a few percent below comparable v2 totals for identical work** — around 4–5% by the
+downsampling result, and the discontinuity will sit at the regime boundary. If a
+step change of roughly that size and direction appears there, it is expected. A much
+larger one, or one in the other direction, is not.
+
+**Outstanding:** once a week of v3 data exists, re-run calibration against WakaTime on
+v3-only data and record the result here. Until that happens, config invariance is the
+algorithm's central claim *and* its least-tested one.
+
+---
+
+## What this does not measure
+
+**This is a measure of editor activity, not of work.** The tracker's only sense organ
+is a VS Code (or Mathematica) event. Everything below is real work that TakaTime
+records as zero, by design:
+
+- **Thinking longer than 15 minutes.** Staring at a problem is indistinguishable from
+  being at lunch. Any pause past `IDLE_TIMEOUT` ends the session, and the design
+  prefers that over inventing time.
+- **Reading.** Documentation, Stack Overflow, API references, a PR diff on GitHub — a
+  browser is invisible.
+- **Anything outside the editor.** Debugging in a terminal, `git` work from the
+  command line, database consoles, log tailing, a running app under manual test.
+- **Whiteboarding, notebooks, and conversation.** Design work on paper, and every
+  meeting or code review.
+- **Compiling and waiting.** Long builds, CI runs, and test suites credit nothing
+  unless you are editing while they run.
+- **Other editors.** Only the two trackers in the table above write to this database.
+
+Two consequences worth internalising. A week of hard design work can look like a light
+week, and **a low number is not evidence of a lazy week** — it may be a week spent
+reading and thinking rather than typing. And because idle time is cut rather than
+estimated, this measure is **biased low against wall-clock effort**, deliberately:
+`IDLE_TIMEOUT` truncates any real pause over 15 minutes, and the only offsetting term
+is one throttle interval per session head.
+
+The right reading of these numbers is *"time with hands on the keyboard in a tracked
+editor"* — a consistent, comparable floor under the real figure, not the real figure.
+
 ---
 
 ## Current totals
 
-Full history, 2026-04-03 through 2026-08-08 — 2130 heartbeats, 284 sessions,
-65 active days.
+Full history, 2026-04-04 through 2026-08-08 — 2142 heartbeats, 287 sessions,
+65 active days. **Snapshot taken 2026-08-08T21:25Z**; these drift as data lands, and
+are reproducible with `npm run export`.
 
 | | |
 |---|---|
-| Attributed time (this algorithm) | **122h11m37s** |
-| Sum of legacy `duration` field | 111h10m30s (**wrong**, −9.0%) |
+| Attributed time (this algorithm) | **122h50m46s** |
+| Sum of legacy `duration` field | 111h20m30s (**wrong**, −9.4%) |
 
 Language shares, showing why heartbeat counts are not a proxy for time:
 
 | Language | Share of heartbeats | Share of time | Time |
 |---|---|---|---|
-| python | 21.4% | **28.7%** | 35h00m44s |
-| javascript | 24.4% | **12.5%** | 15h16m59s |
+| python | 21.3% | **28.5%** | 35h03m10s |
+| javascript | 24.6% | **12.8%** | 15h39m53s |
 | wolframlanguage | 5.2% | 6.5% | 7h59m30s |
-| astro | 13.5% | **6.5%** | 7h57m55s |
-| c | 3.4% | 6.3% | 7h39m44s |
-| javascriptreact | 4.5% | 4.8% | 5h52m49s |
-| markdown | 3.1% | 4.3% | 5h15m26s |
+| astro | 13.4% | **6.5%** | 7h57m55s |
+| c | 3.4% | 6.2% | 7h39m44s |
+| javascriptreact | 4.4% | 4.8% | 5h52m49s |
+| markdown | 3.3% | 4.5% | 5h29m15s |
 | csharp | 1.8% | 3.9% | 4h46m47s |
 
 JavaScript and Astro are the per-file-throttle artifact in the raw data: both are
@@ -378,13 +563,19 @@ reported; filtering is a downstream decision, not a collection-time one.
 ```sh
 cd analytics
 npm install
-npm test                        # calibration + invariants
+npm test                        # calibration + invariants + real-data invariance
 npm run export                  # full bundle: heartbeats + configs + algorithm + this doc
 ```
 
+`npm test` needs no database and reproduces the calibration table, the invariance
+tables, and the legacy-field comparisons — every one of those numbers is printed as
+the suite runs. The whole-history figures under [Current totals](#current-totals) and
+the per-regime table need the live collection, and `npm run export` is the way to get
+them.
+
 The export bundle is self-contained — hand the folder to any analysis tool and it has
-everything needed to interpret the data, including this document and a runnable copy
-of the algorithm.
+everything needed to interpret the data, including this document, both fixtures, and
+a runnable copy of the algorithm.
 
 ---
 
@@ -397,8 +588,19 @@ of the algorithm.
    moment the new build is actually **installed**, not the moment you commit.
 4. Run `npm run migrate:apply` to publish the registry to the `configs` collection.
 5. Rebuild the binary: `./scripts/build-binaries.sh`.
-6. Re-run `npm test`. The calibration should not move — if it does, the change was
-   not config-invariant and needs investigating before it is trusted.
+6. Re-run `npm test`. The calibration runs on a **fixed historical fixture**, so it
+   will not move at all — that is a regression check on the algorithm, not evidence
+   about the new regime. Passing it says nothing about whether the new throttle is
+   config-invariant in practice.
+7. **Re-calibrate against fresh ground truth on the new regime.** Run WakaTime in
+   parallel for a week of new-regime data, then compare. Expect a step of a few
+   percent at the boundary — coarsening reads high, so shortening the throttle
+   should read slightly *low* — and treat anything much larger as a real problem.
+   Record the result under "Calibration".
+
+Steps 6 and 7 are different claims and neither substitutes for the other. Step 6 asks
+*"did I break the algorithm?"*; step 7 asks *"does the algorithm still track reality
+under this throttle?"* The current registry has never had step 7 performed for v3.
 
 Historical data stays correct across the change, which is the whole point. But only
 if step 3 happens.

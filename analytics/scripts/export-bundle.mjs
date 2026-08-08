@@ -94,11 +94,15 @@ try {
     console.log(`  WARNING: METHODOLOGY.md not found at repo root — bundle is incomplete`);
   }
 
-  /* ---- 5. calibration fixture -------------------------------------------- */
-  const fixture = path.join(REPO_ROOT, "analytics", "fixtures", "calibration-2026-08.json");
-  if (fs.existsSync(fixture)) {
-    fs.copyFileSync(fixture, path.join(outDir, "calibration-2026-08.json"));
-    console.log(`  calibration-2026-08.json`);
+  /* ---- 5. fixtures --------------------------------------------------------- */
+  // Both, not just calibration: METHODOLOGY.md ships in this bundle, and its
+  // config-invariance section is reproducible only from the v1 downsampling fixture.
+  for (const name of ["calibration-2026-08.json", "invariance-2026-04.json"]) {
+    const fixture = path.join(REPO_ROOT, "analytics", "fixtures", name);
+    if (fs.existsSync(fixture)) {
+      fs.copyFileSync(fixture, path.join(outDir, name));
+      console.log(`  ${name}`);
+    }
   }
 
   /* ---- 6. precomputed summary -------------------------------------------- */
@@ -169,6 +173,7 @@ console.log(rank(r.groups.language, r.totalMs));
 | \`duration.mjs\` | The canonical algorithm, v${ALGORITHM_VERSION} |
 | \`METHODOLOGY.md\` | What the numbers mean and how they are derived |
 | \`calibration-2026-08.json\` | Fixture validating the algorithm against WakaTime |
+| \`invariance-2026-04.json\` | Dense v1 heartbeats, downsampled to test config invariance |
 | \`summary.json\` | Precomputed totals, as a cross-check |
 
 ## Provenance
