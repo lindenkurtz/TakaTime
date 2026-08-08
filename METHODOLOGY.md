@@ -284,8 +284,8 @@ reverse.
 | Version | Interval | Scope | From (inclusive) | To (exclusive) |
 |---|---|---|---|---|
 | 1 | 120s | per-file | `2026-04-03T00:00:00.000Z` | `2026-04-23T20:57:09.808Z` |
-| 2 | 300s | global | `2026-04-23T20:57:09.808Z` | `2026-08-09T06:00:00.000Z` |
-| 3 | 120s | global | `2026-08-09T06:00:00.000Z` | *(current)* |
+| 2 | 300s | global | `2026-04-23T20:57:09.808Z` | `2026-08-08T20:36:00.000Z` |
+| 3 | 120s | global | `2026-08-08T20:36:00.000Z` | *(current)* |
 
 **Scope** is the part that is easy to miss. `per-file` means one independent throttle
 timer *per open file*, so N files being edited produced roughly N× the heartbeats for
@@ -477,7 +477,7 @@ one heavy one — is the single highest-value thing that could firm this up.
 ### Nothing has validated v3 yet
 
 **All calibration above is v2 (300s) data.** As of this writing the database contains
-**zero v3 heartbeats** — the regime opens at `2026-08-09T06:00:00Z`, which has not
+**zero v3 heartbeats** — the regime opened at `2026-08-08T20:36:00.000Z`, which has just
 arrived. Everything this document says about the 120s regime is therefore a
 *prediction*, resting on the real-data invariance measurement rather than on
 observation.
