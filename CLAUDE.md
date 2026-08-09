@@ -9,10 +9,17 @@ specialized down to: VS Code extension → Go writer → MongoDB, plus a Go term
 dashboard and a JS analytics layer.
 
 ```
-VS Code extension  ──spawn──>  taka-upload  ──>  MongoDB (takatime.logs)
-   (120s throttle)               (Go)                    │
-                                                         ├──>  taka-dashboard (Go TUI)
-                                                         └──>  analytics/duration.mjs
+WRITE   VS Code extension ──spawn──> taka-upload (Go) ──> MongoDB (takatime.logs)
+        (120s throttle)                                        │
+        Mathematica tracker ──pymongo──────────────────────────┘
+
+READ    MongoDB ──> analytics/server.mjs ──> summary.mjs ──> duration.mjs
+                    (localhost:47612)             │
+                                                  ├── VS Code status bar
+                                                  ├── VS Code webview panel
+                                                  └── `taka` CLI
+
+                    taka-dashboard (Go TUI) ──> its own aggregations  ⚠️ WRONG
 ```
 
 One git repo, root at `TakaTime/`. The VS Code extension is nested inside it at
@@ -40,7 +47,34 @@ it downstream — the website will silently keep the old copy otherwise.
 
 **`CONFIG_REGISTRY` in `duration.mjs` is the single source of truth** for throttle
 regimes. The `configs` collection in MongoDB is published *from* it by the migration,
-never the reverse.
+never the reverse. Changing a boundary means re-running `npm run migrate:apply`, or the
+collection keeps saying the old thing.
+
+**Every display reads `analytics/summary.mjs`; none of them queries.** `summary.mjs` is
+pure (imports `duration.mjs` and nothing else) and produces the one object the status
+bar, the CLI and the webview all render. `server.mjs` holds a Mongo connection and the
+whole collection in memory — ~2k documents, so recomputation is single-digit
+milliseconds and there is no reason to page or cache derived numbers. **Adding a
+display means adding a consumer of that object, never a new aggregation.**
+
+`internal/DBQueryV2/` is the counter-example and is deprecated: it sums `duration`, so
+it is wrong for v1/v2 and reads *zero* for v3 records, which do not carry the field at
+all. It is no longer wired to a status bar button. See [TODO.md](TODO.md).
+
+**The extension never talks to MongoDB and has no npm dependencies.** It spawns the
+server with `process.execPath` + `ELECTRON_RUN_AS_NODE=1` — VS Code's own Electron
+behaving as Node — because a spawned `node` is not reliably on the extension host's
+PATH when VS Code is launched from the Dock. The webview never talks to the network
+either; the extension host fetches and `postMessage`s the summary in, which is what
+lets the panel's CSP stay at `default-src 'none'`.
+
+**In the panel, styles go through the CSSOM, never `setAttribute("style", …)`.**
+`style-src` carries no `'unsafe-inline'`, so the style *attribute* is blocked — silently,
+with no console error in a webview. It killed every bar fill while the rest of the page
+looked perfect, because SVG `fill` is a presentation attribute and was unaffected. `h()`
+takes `style` as an object and `Object.assign`s it onto `node.style`. **A headless
+render without the CSP meta tag will not reproduce this** — copy the real
+`Content-Security-Policy` into the harness when design-reviewing.
 
 **Config boundaries are empirical, read off the data, not the git log.** Commits
 landed 2026-04-21 but the rebuilt binary was not installed until 2026-04-23. The
@@ -62,8 +96,10 @@ published to upstream's releases page. The old `BinaryDownload.js` fetched from
 upstream and could only ever install a binary older than the extension asking for it.
 
 **Editing the extension source does nothing on its own.** VS Code runs an installed
-*snapshot* in `~/.vscode/extensions/`. Reloading reloads the snapshot. To see a
-change you must repackage and reinstall:
+*snapshot* in `~/.vscode/extensions/`. Reloading reloads the snapshot. The same is true
+of the analytics bundle: the extension runs the copy in `~/.takatime/analytics`, so
+editing `analytics/*.mjs` in the repo changes nothing until `./scripts/build-binaries.sh`
+reinstalls it. To see an extension change you must repackage and reinstall:
 
 ```sh
 cd vscodePlugin/Takatime && npx @vscode/vsce package
@@ -76,14 +112,26 @@ Then reload. Verify with `code --list-extensions --show-versions | grep taka`.
 
 ```sh
 go build ./...                       # from repo root
-./scripts/build-binaries.sh          # build + install to ~/.takatime/bin
+./scripts/build-binaries.sh          # Go binaries -> ~/.takatime/bin
+                                     # analytics bundle -> ~/.takatime/analytics
+                                     # `taka` shim -> ~/.takatime/bin/taka
 
 cd analytics
-npm test                             # calibration + invariants (no DB needed)
+npm test                             # calibration + invariants + summary (no DB needed)
 npm run migrate                      # dry run; --apply to commit
-npm run export                       # self-contained analysis bundle
+npm run export                       # self-contained analysis bundle (folder + .zip)
 npm run build-fixture                # regenerate fixture from live data (moves calibration)
+npm run serve                        # stats server on 127.0.0.1:47612
+npm run taka -- doctor               # CLI; --direct skips the server
 ```
+
+`taka` subcommands: `summary` (default) `today` `week` `now` `sessions` `hours` `all`
+`doctor`. `--oneline` is the shell-prompt form; `--json` dumps the whole summary.
+
+**The panel can be rendered without VS Code.** Inline `media/panel.css` and
+`media/panel.js` into one HTML file, stub `acquireVsCodeApi()`, and
+`window.postMessage({type:"summary", summary})` — then screenshot it headless. That is
+the only practical way to design-review the charts; see [TODO.md](TODO.md).
 
 Mongo URI resolution order: `--uri` flag, `$TAKATIME_MONGO_URI` / `$MONGO_URI`, then
 `MONGO_URI` in `~/.takatime.json`.

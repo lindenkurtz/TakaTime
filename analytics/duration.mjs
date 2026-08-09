@@ -89,13 +89,13 @@ export const CONFIG_REGISTRY = [
     intervalSeconds: 300,
     scope: "global",
     from: "2026-04-23T20:57:09.808Z",
-    to: "2026-08-09T06:00:00.000Z",
+    to: "2026-08-08T20:36:00.000Z",
   },
   {
     version: 3,
     intervalSeconds: 120,
     scope: "global",
-    from: "2026-08-09T06:00:00.000Z",
+    from: "2026-08-08T20:36:00.000Z",
     to: null,
   },
 ];

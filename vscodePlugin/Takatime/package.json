@@ -2,7 +2,7 @@
   "name": "takatime",
   "displayName": "TakaTime - Privacy First Time Tracker",
   "description": "A privacy-first, serverless time tracker. Track coding metrics, visualize productivity, and maintain full data ownership.",
-  "version": "0.2.1",
+  "version": "0.3.2",
   "license": "MIT",
   "publisher": "local-dev",
   "icon": "public/TakatimeLogo.png",
@@ -35,14 +35,66 @@
   "contributes": {
     "commands": [
       {
+        "command": "takatime.showStats",
+        "title": "TakaTime: Open Stats Panel"
+      },
+      {
         "command": "takatime.setup",
         "title": "TakaTime: Setup MongoDB URI"
       },
       {
         "command": "takatime.showDashboard",
-        "title": "TakaTime: Open Dashboard"
+        "title": "TakaTime: Open Legacy Go Dashboard (deprecated — sums the retired duration field)"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "TakaTime",
+      "properties": {
+        "takatime.stats.statusBar": {
+          "type": "string",
+          "enum": [
+            "session-and-today",
+            "session",
+            "hidden"
+          ],
+          "enumDescriptions": [
+            "Session state and length, then today's total.",
+            "Session state and length only.",
+            "No status bar item."
+          ],
+          "default": "session-and-today",
+          "description": "What the TakaTime status bar item shows. The icon always indicates whether a session is active."
+        },
+        "takatime.stats.weekDays": {
+          "type": "number",
+          "default": 7,
+          "minimum": 1,
+          "maximum": 90,
+          "description": "Length in days of the trailing window used for 'this week' totals and leaderboards."
+        },
+        "takatime.stats.refreshSeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 15,
+          "description": "How often the status bar re-reads the stats. Heartbeats are throttled to 120s, so polling faster than that mostly re-renders the same number."
+        },
+        "takatime.stats.autoStartServer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start the local stats server (analytics/server.mjs) if nothing is listening. It exits on its own after 30 minutes with no requests."
+        },
+        "takatime.stats.port": {
+          "type": "number",
+          "default": 47612,
+          "description": "Loopback port for the stats server. Must match --port if you run the server yourself."
+        },
+        "takatime.stats.analyticsPath": {
+          "type": "string",
+          "default": "",
+          "description": "Directory holding the analytics bundle. Defaults to ~/.takatime/analytics, where scripts/build-binaries.sh installs it."
+        }
+      }
+    }
   },
   "scripts": {
     "lint": "eslint .",

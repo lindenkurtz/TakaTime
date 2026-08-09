@@ -107,6 +107,23 @@ zero-dependency ESM, no database and no editor imports, so it can be copied verb
 into consuming repos. It exports `ALGORITHM_VERSION`; record that alongside any
 derived statistic you persist.
 
+### The layer above it
+
+[`analytics/summary.mjs`](analytics/summary.mjs) turns raw `computeDurations()` output
+into the object every TakaTime display renders — today, the trailing window,
+leaderboards, sessions, streaks, the heatmap, and a data-health block. It is the same
+kind of module: pure, importing only `duration.mjs`, so it runs in Node, in a browser,
+and inside a VS Code webview unchanged.
+
+**Every surface consumes it and nothing else.** The status bar, the `taka` CLI and the
+webview panel all render one summary object fetched from
+[`analytics/server.mjs`](analytics/server.mjs); none of them computes a duration. That
+is deliberate. The Go terminal dashboard in `internal/DBQueryV2/` is what it looks like
+when a display grows its own aggregation — it sums the retired `duration` field, and
+reads v3 heartbeats as zero because they do not carry one. See [TODO.md](TODO.md).
+
+If you are adding a display, add it to that list rather than writing a query.
+
 ### Parameters
 
 | Parameter | Current value | Meaning |
@@ -476,11 +493,12 @@ one heavy one — is the single highest-value thing that could firm this up.
 
 ### Nothing has validated v3 yet
 
-**All calibration above is v2 (300s) data.** As of this writing the database contains
-**zero v3 heartbeats** — the regime opened at `2026-08-08T20:36:00.000Z`, which has just
-arrived. Everything this document says about the 120s regime is therefore a
+**All calibration above is v2 (300s) data.** The database now contains v3 heartbeats —
+60 of them as of 2026-08-09, the first at `2026-08-08T20:38:12.291Z`, two minutes after
+the declared boundary — but no WakaTime ground truth has been collected in parallel on
+the new regime. Everything this document says about the 120s regime is therefore still a
 *prediction*, resting on the real-data invariance measurement rather than on
-observation.
+observation. Having v3 data is not the same as having validated it.
 
 The concrete prediction: because coarser throttles read high, **v3 totals should run
 a few percent below comparable v2 totals for identical work** — around 4–5% by the
@@ -488,9 +506,9 @@ downsampling result, and the discontinuity will sit at the regime boundary. If a
 step change of roughly that size and direction appears there, it is expected. A much
 larger one, or one in the other direction, is not.
 
-**Outstanding:** once a week of v3 data exists, re-run calibration against WakaTime on
-v3-only data and record the result here. Until that happens, config invariance is the
-algorithm's central claim *and* its least-tested one.
+**Outstanding:** run WakaTime in parallel for a week on the current regime, then re-run
+calibration on v3-only data and record the result here. Until that happens, config
+invariance is the algorithm's central claim *and* its least-tested one.
 
 ---
 

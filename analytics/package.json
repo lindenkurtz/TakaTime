@@ -9,8 +9,13 @@
   "exports": {
     ".": "./duration.mjs"
   },
+  "bin": {
+    "taka": "./cli.mjs"
+  },
   "scripts": {
     "test": "node --test 'test/*.test.mjs'",
+    "taka": "node cli.mjs",
+    "serve": "node server.mjs",
     "migrate": "node scripts/migrate-config-version.mjs",
     "migrate:apply": "node scripts/migrate-config-version.mjs --apply",
     "build-fixture": "node scripts/build-fixture.mjs",

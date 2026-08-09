@@ -4,6 +4,9 @@ const statusHelper = require("./Plugin/StatusBarUpdate");
 const setupHelper = require("./Plugin/Setup");
 const heartbeat = require("./Plugin/HeartBeat");
 const { showDashboard } = require("./Plugin/showDashboard");
+const { StatsClient } = require("./Plugin/StatsClient");
+const { StatsBar } = require("./Plugin/StatsBar");
+const { showStatsPanel } = require("./Plugin/StatsPanel");
 
 /**
  * @param {vscode.ExtensionContext} context
@@ -31,28 +34,41 @@ async function activate(context) {
 
   // ... your other existing setup code ...
 
-  // Register the dashboard command
+  // 2b. Stats surfaces.
+  //
+  // Both read the same summary object from the local stats server, which is the only
+  // thing that runs analytics/duration.mjs. Nothing here computes a duration.
+  const statsClient = new StatsClient(outputChannel);
+
+  const statsCommand = vscode.commands.registerCommand("takatime.showStats", () => {
+    showStatsPanel(context, statsClient);
+  });
+  context.subscriptions.push(statsCommand);
+
+  const statsBar = new StatsBar(statsClient);
+  statsBar.start();
+  context.subscriptions.push({ dispose: () => statsBar.dispose() });
+
+  // Picking up a changed port or refresh interval should not need a window reload.
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("takatime.stats")) {
+        statsBar.show();
+        statsBar.refresh();
+      }
+    }),
+  );
+
+  // The legacy Go TUI. Kept reachable from the command palette, but no longer given a
+  // status bar button: its aggregations sum the legacy `duration` field, which is
+  // wrong (METHODOLOGY.md) and reads as zero for v3 records that have no such field.
   const dashCommand = vscode.commands.registerCommand(
     "takatime.showDashboard",
     () => {
       showDashboard(context);
     },
   );
-
-  // Don't forget to push it to subscriptions so VS Code can clean it up later!
   context.subscriptions.push(dashCommand);
-
-  // --- Create Dashboard Button in Status Bar ---
-  const dashStatusBar = vscode.window.createStatusBarItem(
-    vscode.StatusBarAlignment.Left,
-    99, // This priority number keeps it right next to your main status item (100)
-  );
-  dashStatusBar.text = "$(graph)  TakaTime Dashboard";
-  dashStatusBar.tooltip = "Open TakaTime Dashboard";
-  dashStatusBar.command = "takatime.showDashboard";
-  dashStatusBar.show();
-
-  context.subscriptions.push(dashStatusBar);
 
   // 3a. Text-document Save Listener
   const saveListener = vscode.workspace.onDidSaveTextDocument((document) => {

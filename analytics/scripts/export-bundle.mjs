@@ -13,9 +13,11 @@
  *   node scripts/export-bundle.mjs --out ~/somewhere
  *   node scripts/export-bundle.mjs --from 2026-05-01 --to 2026-08-09
  *   node scripts/export-bundle.mjs --format ndjson        # json (default) | ndjson | both
+ *   node scripts/export-bundle.mjs --no-zip               # folder only, skip the archive
  */
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { connect, LOGS, CONFIGS, MIGRATIONS, safeUri, resolveUri } from "./_mongo.mjs";
 import {
@@ -37,12 +39,20 @@ function arg(name, fallback = null) {
   return i !== -1 && argv[i + 1] ? argv[i + 1] : fallback;
 }
 
+function flag(name) {
+  return process.argv.slice(2).includes(`--${name}`);
+}
+
 const stamp = new Date().toISOString().slice(0, 10);
-const outRoot = arg("out", path.join(REPO_ROOT, "exports"));
-const outDir = path.join(outRoot, `takatime-${stamp}`);
+// Resolved, not raw: the archive step runs `zip` with cwd set to outRoot, so a
+// relative --out would otherwise be re-resolved against itself.
+const outRoot = path.resolve(arg("out", path.join(REPO_ROOT, "exports")));
+const bundleName = `takatime-${stamp}`;
+const outDir = path.join(outRoot, bundleName);
 const from = arg("from");
 const to = arg("to");
 const format = arg("format", "json");
+const wantZip = !flag("no-zip");
 
 const { client, db } = await connect();
 try {
@@ -188,8 +198,32 @@ console.log(rank(r.groups.language, r.totalMs));
   fs.writeFileSync(path.join(outDir, "README.md"), readme);
   console.log(`  README.md`);
 
+  /* ---- 8. archive --------------------------------------------------------- */
+  // The folder is the bundle; the zip is the thing you can actually hand to
+  // someone. The folder stays put — it is the more useful of the two locally.
+  let zipPath = null;
+  if (wantZip) {
+    zipPath = path.join(outRoot, `${bundleName}.zip`);
+    // `zip` *updates* an existing archive rather than replacing it, so a re-run on
+    // the same day would keep files that are no longer in the bundle.
+    fs.rmSync(zipPath, { force: true });
+    try {
+      // Shelling out keeps this dependency-free, and `cwd: outRoot` is what makes
+      // the archive unpack as a single `takatime-<date>/` folder rather than
+      // spraying files (or absolute paths) into whatever directory it lands in.
+      execFileSync("zip", ["-r", "-q", "-X", zipPath, bundleName], { cwd: outRoot });
+      const mb = (fs.statSync(zipPath).size / 1024 / 1024).toFixed(1);
+      console.log(`  ${bundleName}.zip   ${mb} MB`);
+    } catch (err) {
+      zipPath = null;
+      const why = err.code === "ENOENT" ? "`zip` is not installed" : err.message;
+      console.log(`  WARNING: archive skipped — ${why}`);
+    }
+  }
+
   console.log("");
   console.log(`Bundle complete: ${outDir}`);
+  if (zipPath) console.log(`Archive:         ${zipPath}`);
 } finally {
   await client.close();
 }

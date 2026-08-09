@@ -1,0 +1,479 @@
+/*
+ * TakaTime stats panel.
+ *
+ * The panel paints its OWN surfaces rather than inheriting the editor theme's.
+ * The categorical palette below was validated against these two specific surfaces
+ * (#fcfcfb light, #1a1a19 dark); rendering it on an arbitrary user theme's background
+ * would invalidate every contrast and lightness result. Light/dark still follows the
+ * editor, via the vscode-light / vscode-dark classes VS Code puts on <body>.
+ *
+ * Dark is SELECTED, not flipped: it is the same eight hues re-stepped for the dark
+ * band, not an inversion.
+ */
+
+:root,
+body.vscode-light,
+body.vscode-high-contrast-light {
+  color-scheme: light;
+
+  --surface-1: #fcfcfb;
+  --plane: #f9f9f7;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.1);
+  --good: #006300;
+
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-other: #b8b7b0;
+
+  /* Sequential blue, light -> dark. Heatmap bins. */
+  --seq-0: #eeeeea;
+  --seq-1: #cde2fb;
+  --seq-2: #9ec5f4;
+  --seq-3: #5598e7;
+  --seq-4: #2a78d6;
+  --seq-5: #184f95;
+}
+
+body.vscode-dark,
+body.vscode-high-contrast {
+  color-scheme: dark;
+
+  --surface-1: #1a1a19;
+  --plane: #0d0d0d;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --border: rgba(255, 255, 255, 0.1);
+  --good: #0ca30c;
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-other: #4a4a46;
+
+  --seq-0: #242422;
+  --seq-1: #0d366b;
+  --seq-2: #184f95;
+  --seq-3: #256abf;
+  --seq-4: #3987e5;
+  --seq-5: #86b6ef;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--plane);
+  color: var(--text-primary);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+#root {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 20px 48px;
+}
+
+/* ---------------------------------------------------------------- header -- */
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.head h1 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.head .sub {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.head .actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+button {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  min-height: 26px;
+}
+
+button:hover {
+  color: var(--text-primary);
+  border-color: var(--axis);
+}
+
+button[aria-pressed="true"] {
+  color: var(--text-primary);
+  border-color: var(--axis);
+  background: var(--plane);
+}
+
+.live-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--good);
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.live-dot.idle {
+  background: var(--axis);
+}
+
+/* ----------------------------------------------------------------- tiles -- */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.tile {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.tile .label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.tile .value {
+  /* Proportional figures: tabular-nums makes large standalone numbers look loose. */
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.tile .note {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* ----------------------------------------------------------------- cards -- */
+
+/*
+ * Explicit column counts, not auto-fit. panel.js draws each chart at a computed pixel
+ * width, so it has to be able to predict the column count exactly; auto-fit would
+ * silently produce three columns on a wide panel and overflow every chart in them.
+ * The 704px breakpoint is the viewport width at which content width reaches 664px.
+ */
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+@media (min-width: 704px) {
+  .grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  min-width: 0;
+}
+
+.card.wide {
+  grid-column: 1 / -1;
+}
+
+.card h2 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 2px;
+}
+
+.card .caption {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0 0 14px;
+}
+
+/*
+ * Charts carry explicit pixel width/height, matching what panel.js measured. A CSS
+ * `width: 100%` would letterbox them against their viewBox instead — which shrinks
+ * the heatmap to a stamp in the middle of its card and scales the type.
+ */
+.card svg {
+  display: block;
+  overflow: visible;
+}
+
+/* Wide marks scroll inside their own card rather than pushing the page sideways. */
+.scroll-x {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* ---------------------------------------------------------------- legend -- */
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+
+/* ------------------------------------------------------------------ bars -- */
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+
+.row .name {
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row .val {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.row .track {
+  grid-column: 1 / -1;
+  height: 8px;
+  background: var(--grid);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.row .fill {
+  height: 100%;
+  border-radius: 4px;
+  min-width: 3px;
+}
+
+/* ----------------------------------------------------------------- table -- */
+
+.table-wrap {
+  margin-top: 14px;
+  border-top: 1px solid var(--grid);
+  padding-top: 10px;
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 3px 10px 3px 0;
+  white-space: nowrap;
+}
+
+th {
+  color: var(--text-muted);
+  font-weight: 500;
+  border-bottom: 1px solid var(--grid);
+}
+
+td.num,
+th.num {
+  text-align: right;
+}
+
+td.name {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* --------------------------------------------------------------- tooltip -- */
+
+#tip {
+  position: fixed;
+  pointer-events: none;
+  z-index: 20;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  max-width: 280px;
+}
+
+#tip .t-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+#tip .t-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+
+#tip .t-row .val {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+/* ------------------------------------------------------------ chart bits -- */
+
+.tick {
+  fill: var(--text-muted);
+  font-size: 10px;
+}
+
+.tick.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.gridline {
+  stroke: var(--grid);
+  stroke-width: 1;
+}
+
+.axisline {
+  stroke: var(--axis);
+  stroke-width: 1;
+}
+
+.hit {
+  fill: transparent;
+  cursor: default;
+}
+
+.hit:hover ~ .band,
+.col.active .band {
+  opacity: 1;
+}
+
+/* --------------------------------------------------------------- footers -- */
+
+.footer {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--grid);
+  color: var(--text-muted);
+  font-size: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+
+.footer .caveat {
+  flex-basis: 100%;
+  color: var(--text-secondary);
+}
+
+.warn {
+  color: var(--text-primary);
+  background: var(--plane);
+  border: 1px solid var(--axis);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  font-size: 12px;
+}
+
+.empty {
+  text-align: center;
+  padding: 80px 20px;
+  color: var(--text-secondary);
+}
+
+.empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.stale {
+  opacity: 0.55;
+}
