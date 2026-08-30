@@ -11,7 +11,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { addDays, buildSummary, daysBetween, formatAgo, formatCompact, startOfDayMs } from "../summary.mjs";
+import {
+  addDays,
+  agentOf,
+  buildSummary,
+  daysBetween,
+  formatAgo,
+  formatCompact,
+  startOfDayMs,
+} from "../summary.mjs";
 import { dayKey } from "../duration.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -281,4 +289,183 @@ test("formatAgo makes a stalled tracker legible", () => {
   assert.equal(formatAgo(240_000), "4m ago");
   assert.equal(formatAgo(7_200_000), "2h ago");
   assert.equal(formatAgo(3 * 86_400_000), "3d ago");
+});
+
+/* -------------------------------------------------------------------------- */
+/* The human / AI split                                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The calibration fixture predates agents, so the agent side is synthesised here:
+ * a run of ClaudeCode heartbeats laid over a slice of the fixture's own busiest day,
+ * plus the write records that make some of the editor heartbeats echoes of them.
+ * Synthetic on purpose — these tests pin the ARITHMETIC of the split, and a fixture
+ * that has to be regenerated from live data cannot pin arithmetic.
+ */
+function withAgent() {
+  const vs = fixture.heartbeats.filter((h) => h.editor === "VsCode");
+  const day = summary.week.series.reduce((a, b) => (b.ms > a.ms ? b : a)).day;
+  const onDay = vs.filter((h) => dayKey(Date.parse(h.timestamp), TZ) === day).slice(0, 12);
+
+  const agent = onDay.map((h, i) => ({
+    ...h,
+    editor: "ClaudeCode",
+    // Offset so the agent stream overlaps the editor stream rather than duplicating
+    // its instants exactly, which is what real concurrency looks like.
+    timestamp: new Date(Date.parse(h.timestamp) + 30_000 + i).toISOString(),
+    configVersion: 2,
+  }));
+
+  // Half of the editor heartbeats on that day become echoes: an agent wrote the same
+  // file a few seconds earlier.
+  const aiWrites = onDay.slice(0, 6).map((h) => ({
+    timestamp: new Date(Date.parse(h.timestamp) - 5_000).toISOString(),
+    file: h.name,
+  }));
+
+  return { heartbeats: [...fixture.heartbeats, ...agent], aiWrites, echoCandidates: onDay.slice(0, 6) };
+}
+
+const mixed = withAgent();
+const split = buildSummary(mixed.heartbeats, { now: NOW, timeZone: TZ, aiWrites: mixed.aiWrites });
+
+test("the three split bands partition the union exactly", () => {
+  // Integer milliseconds, so this is an equality and not an approximation — the same
+  // property the grouping dimensions have in duration.mjs.
+  for (const block of [split.today, split.week, split.allTime]) {
+    const s = block.split;
+    assert.equal(
+      s.humanOnlyMs + s.overlapMs + s.aiOnlyMs,
+      s.unionMs,
+      "humanOnly + overlap + aiOnly must equal the union",
+    );
+  }
+});
+
+test("human and AI overlap rather than partition, and are never additive", () => {
+  const s = split.allTime.split;
+  assert.ok(s.overlapMs > 0, "the synthetic agent stream overlaps the editor stream");
+  assert.equal(s.humanMs + s.aiMs - s.overlapMs, s.unionMs);
+  assert.ok(s.humanMs + s.aiMs > s.unionMs, "adding the two overcounts, which is why we do not");
+});
+
+test("the bands survive two streams that interleave without co-occurring", () => {
+  // The case that broke the first implementation. Defining overlap arithmetically as
+  // `human + ai - union` looks equivalent to measuring it, and is not: merging two
+  // sparse streams CLOSES a gap neither could see alone, so the union exceeds the sum
+  // and the "overlap" goes negative. Clamping it to zero then quietly broke the
+  // partition the stacked bar is drawn from.
+  const hbs = [
+    { timestamp: "2026-08-20T16:00:00.000Z", editor: "VsCode", name: "a.c", project: "p", language: "c", configVersion: 3 },
+    { timestamp: "2026-08-20T16:05:00.000Z", editor: "ClaudeCode", name: "b.c", project: "p", language: "c", configVersion: 3 },
+  ];
+  const s = buildSummary(hbs, { now: Date.parse("2026-08-20T18:00:00Z"), timeZone: TZ }).allTime.split;
+
+  // 300s apart is further than the 120s throttle can resolve, so this is interleaving
+  // and NOT concurrency — the distinction the arithmetic definition could not make.
+  assert.equal(s.overlapMs, 0, "no concurrency should be claimed at this spacing");
+  assert.equal(s.humanOnlyMs + s.overlapMs + s.aiOnlyMs, s.unionMs, "the partition must still hold");
+  assert.equal(s.humanMs + s.aiMs - s.overlapMs, s.unionMs, "and must reconcile with the totals");
+  for (const k of ["humanOnlyMs", "overlapMs", "aiOnlyMs"]) {
+    assert.ok(s[k] >= 0, `${k} went negative — the old arithmetic definition is back`);
+  }
+});
+
+test("every band is non-negative on the real fixture, in every window", () => {
+  for (const block of [split.today, split.week, split.allTime]) {
+    for (const k of ["humanOnlyMs", "overlapMs", "aiOnlyMs", "humanMs", "aiMs", "unionMs"]) {
+      assert.ok(block.split[k] >= 0, `${k} went negative`);
+    }
+  }
+});
+
+test("the union is the top-level total, not the editor's own", () => {
+  assert.equal(split.allTime.split.unionMs, split.allTime.ms);
+  assert.equal(split.week.split.unionMs, split.week.ms);
+  assert.equal(split.today.split.unionMs, split.today.ms);
+});
+
+test("agent time is attributed to the agent, not to the human", () => {
+  assert.ok(split.allTime.split.aiMs > 0);
+  const human = buildSummary(mixed.heartbeats, {
+    now: NOW,
+    timeZone: TZ,
+    aiWrites: mixed.aiWrites,
+    filter: (hb) => hb.editor !== "ClaudeCode",
+  });
+  assert.equal(human.allTime.split.aiMs, 0);
+  assert.ok(human.allTime.ms <= split.allTime.ms, "removing a stream cannot add time");
+});
+
+test("echo suppression drops duplicate observations and lowers human time", () => {
+  const unsuppressed = buildSummary(mixed.heartbeats, { now: NOW, timeZone: TZ });
+  assert.equal(unsuppressed.data.echoHeartbeats, 0, "no write records means no suppression");
+  assert.ok(split.data.echoHeartbeats > 0, "the synthetic writes should catch some heartbeats");
+  assert.ok(
+    split.allTime.split.humanMs < unsuppressed.allTime.split.humanMs,
+    "suppressing an agent's echo must reduce HUMAN time",
+  );
+  assert.equal(
+    split.data.echoRemovedMs,
+    unsuppressed.allTime.split.humanMs - split.allTime.split.humanMs,
+    "the reported cost of suppression is the actual difference it makes",
+  );
+});
+
+test("without write records nothing is suppressed and 1.x numbers are reproduced", () => {
+  // The fail-safe. A machine that has never run the importer must under-report the
+  // split, never invent one — and must not silently change the editor's own totals.
+  const none = buildSummary(fixture.heartbeats, { now: NOW, timeZone: TZ });
+  assert.equal(none.data.aiWrites, 0);
+  assert.equal(none.data.echoHeartbeats, 0);
+  assert.equal(none.data.echoRemovedMs, 0);
+  assert.equal(none.allTime.ms, summary.allTime.ms);
+  assert.equal(none.allTime.split.aiMs, 0);
+  assert.equal(none.allTime.split.humanMs, none.allTime.ms, "all of it is human when nothing else writes");
+});
+
+test("an agent's echo is only suppressed for the file the agent actually wrote", () => {
+  // A blanket time-window rule would swallow genuine parallel work. The join is on
+  // the PATH as well as the instant.
+  const wrongFile = mixed.aiWrites.map((w) => ({ ...w, file: w.file + ".not-this-one" }));
+  const s = buildSummary(mixed.heartbeats, { now: NOW, timeZone: TZ, aiWrites: wrongFile });
+  assert.equal(s.data.echoHeartbeats, 0);
+});
+
+test("per-project split rows are themselves exact partitions", () => {
+  for (const block of [split.week, split.allTime]) {
+    for (const row of block.projectSplit) {
+      assert.equal(row.totalMs, row.humanOnlyMs + row.overlapMs + row.aiOnlyMs);
+      // NOT humanMs + aiMs — those double-count the overlap, by design.
+      assert.equal(row.humanMs + row.aiMs - row.overlapMs, row.totalMs);
+      assert.ok(row.aiShare >= 0 && row.aiShare <= 1);
+    }
+    const rowsSum = block.projectSplit.reduce((a, r) => a + r.totalMs, 0);
+    assert.ok(rowsSum <= block.split.unionMs, "a capped leaderboard cannot exceed the union");
+  }
+});
+
+test("the daily split series partitions each day, and the window", () => {
+  // What the daily chart is drawn from. If a column does not add to its day's total,
+  // the chart is lying about a number the reader can check against the tile above it.
+  let sum = 0;
+  for (const d of split.agentTrend.series) {
+    assert.equal(d.values["human-only"] + d.values.concurrent + d.values["ai-only"], d.total);
+    sum += d.total;
+  }
+  const daily = Object.fromEntries(split.heatmap.map((d) => [d.day, d.ms]));
+  for (const d of split.agentTrend.series) {
+    assert.equal(d.total, daily[d.day] ?? 0, `${d.day} disagrees with the daily series`);
+  }
+  assert.ok(sum <= split.allTime.ms);
+});
+
+test("the agent dimension is derived, never read off the heartbeat", () => {
+  // There is no `agent` field in the database and no migration created one. If this
+  // ever starts reading a stored field, the derivation has quietly become a schema.
+  assert.equal(agentOf({ editor: "ClaudeCode" }), "ai");
+  assert.equal(agentOf({ editor: "VsCode" }), "human");
+  assert.equal(agentOf({ editor: "Mathematica" }), "human");
+  assert.equal(agentOf({ editor: "VsCode", agent: "ai" }), "human", "a stored field must not win");
+  assert.equal(agentOf({}), "human", "an unknown tracker is a human one until declared");
 });

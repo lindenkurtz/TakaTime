@@ -95,9 +95,20 @@ class StatsBar {
       );
     }
 
+    // The split is stated as three DISJOINT bands. The overlapping human and AI
+    // totals do not belong in a tooltip: there is no room for the caveat that they
+    // must not be added, and a number without its caveat gets added.
+    const split = summary.week.split;
+    const splitRow = split && split.unionMs > 0
+      ? `| **Human / AI** | ${formatCompact(split.humanOnlyMs)} you · ` +
+        (split.overlapMs > 0 ? `${formatCompact(split.overlapMs)} both · ` : "") +
+        `${formatCompact(split.aiOnlyMs)} AI (${Math.round(split.aiShare * 100)}%) |\n`
+      : "";
+
     md.appendMarkdown(
       `| **Today** | ${summary.today.formatted} · ${summary.today.sessionCount} session${summary.today.sessionCount === 1 ? "" : "s"} |\n` +
         `| **Last ${summary.week.days}d** | ${summary.week.formatted} · ${formatCompact(summary.week.averageMsPerDay)}/day |\n` +
+        splitRow +
         `| **Streak** | ${summary.streak.current} day${summary.streak.current === 1 ? "" : "s"} (best ${summary.streak.longest}) |\n\n`,
     );
 

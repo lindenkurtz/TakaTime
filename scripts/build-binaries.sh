@@ -67,6 +67,34 @@ exec node "$HOME/.takatime/analytics/cli.mjs" "$@"
 SHIM
 chmod +x "$BIN_DIR/taka"
 
+# ---------------------------------------------------------------------------
+# Claude Code tracker
+# ---------------------------------------------------------------------------
+# Installed under the SAME relative layout as the repo (trackers/claude-code next to
+# analytics/), because import-claude.mjs imports ../../analytics/duration.mjs to read
+# CONFIG_REGISTRY. Flattening the two directories would break that import, and copying
+# the registry instead would create the second source of truth METHODOLOGY.md exists
+# to prevent. Node also resolves the mongodb driver by walking up from _mongo.mjs, so
+# the single node_modules under analytics/ serves both.
+
+TRACKER_DIR="$HOME/.takatime/trackers/claude-code"
+
+echo ""
+echo "Installing Claude Code tracker -> $TRACKER_DIR"
+
+mkdir -p "$TRACKER_DIR"
+cp trackers/claude-code/import-claude.mjs trackers/claude-code/transcript.mjs "$TRACKER_DIR/"
+
+cat > "$BIN_DIR/taka-claude-import" <<'SHIM'
+#!/usr/bin/env sh
+# Import Claude Code sessions as heartbeats. Installed by scripts/build-binaries.sh.
+#
+# Idempotent: safe to run on a timer, from a Claude Code Stop hook, or by hand.
+# Runs with --apply because a hook that dry-runs would silently never record anything.
+exec node "$HOME/.takatime/trackers/claude-code/import-claude.mjs" --apply --quiet "$@"
+SHIM
+chmod +x "$BIN_DIR/taka-claude-import"
+
 echo ""
 echo "Installed:"
 ls -1 "$BIN_DIR" | sed 's/^/  /'

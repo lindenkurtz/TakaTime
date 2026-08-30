@@ -208,6 +208,140 @@
     ]);
   }
 
+  /* ------------------------------------------------------- human / AI split -- */
+
+  /**
+   * Colours for the split. Human and AI take the two most separable slots in the
+   * palette; the overlap takes a third rather than a blend, because a blend reads as
+   * "somewhere between" when what it means is "both at once".
+   */
+  function splitColors() {
+    return {
+      human: cssVar("--series-1"),
+      both: cssVar("--series-4"),
+      ai: cssVar("--series-2"),
+    };
+  }
+
+  /** `mode` keys are wire values; these are what a person should read. */
+  const MODE_LABEL = {
+    "human-only": "Human only",
+    concurrent: "Both at once",
+    "ai-only": "AI only",
+  };
+
+  function modeColor(key) {
+    const c = splitColors();
+    return key === "ai-only" ? c.ai : key === "concurrent" ? c.both : c.human;
+  }
+
+  /**
+   * One stacked bar over the union, plus a legend.
+   *
+   * DISJOINT bands, not two overlapping totals: `humanOnly + both + aiOnly` is exactly
+   * `unionMs`, so the segments can be laid end to end and still add up. The
+   * overlapping per-stream figures go in the caption underneath, next to the warning
+   * not to add them — a chart cannot carry that caveat, so it must not imply it.
+   */
+  function splitBar(split) {
+    const c = splitColors();
+    const union = split.unionMs || 1;
+    const bands = [
+      { key: "Human only", ms: split.humanOnlyMs, color: c.human },
+      { key: "Both at once", ms: split.overlapMs, color: c.both },
+      { key: "AI only", ms: split.aiOnlyMs, color: c.ai },
+    ];
+
+    const bar = h(
+      "div",
+      { class: "split-bar" },
+      bands
+        .filter((b) => b.ms > 0)
+        .map((b) =>
+          h("div", {
+            class: "split-seg",
+            style: { width: (b.ms / union) * 100 + "%", background: b.color },
+            title: b.key + " · " + compact(b.ms),
+            onmousemove: (e) =>
+              showTip(e, b.key, [
+                { label: "Time", value: compact(b.ms), color: b.color },
+                { label: "Share", value: ((b.ms / union) * 100).toFixed(1) + "%" },
+              ]),
+            onmouseleave: hideTip,
+          }),
+        ),
+    );
+
+    const legend = h(
+      "ul",
+      { class: "legend" },
+      bands.map((b) =>
+        h("li", {}, [
+          h("span", { class: "swatch", style: { background: b.color } }),
+          h("span", { text: b.key + " " + compact(b.ms) }),
+        ]),
+      ),
+    );
+
+    return { bar: bar, legend: legend };
+  }
+
+  /**
+   * Per-project human vs AI.
+   *
+   * The bar's LENGTH is the project's total time, scaled against the largest row, and
+   * the split WITHIN it is the human/AI proportion. Both facts, one mark — and the
+   * same length encoding every other card uses, so a short bar means less time here
+   * too. Normalising every row to full width would have made a 17-minute project look
+   * the size of a three-hour one.
+   */
+  function splitRows(rows) {
+    if (!rows || rows.length === 0) {
+      return h("div", { class: "caption", text: "Nothing yet." });
+    }
+    const max = Math.max.apply(null, rows.map((r) => r.totalMs)) || 1;
+    return h(
+      "div",
+      { class: "rows" },
+      rows.map((r) => {
+        const total = r.totalMs || 1;
+        // The THREE DISJOINT bands, not humanMs against aiMs. Those two overlap, so
+        // laying them end to end sums past 100% — the bar overflowed its track and
+        // was silently clipped, drawing a project with concurrent time as pure AI.
+        const bands = [
+          { key: "human-only", ms: r.humanOnlyMs },
+          { key: "concurrent", ms: r.overlapMs },
+          { key: "ai-only", ms: r.aiOnlyMs },
+        ];
+        return h("div", { class: "row" }, [
+          h("div", { class: "name", title: r.key, text: shorten(r.key, 46) }),
+          h("div", {
+            class: "val",
+            text: compact(r.totalMs) + "  " + (r.aiShare * 100).toFixed(0) + "% AI",
+          }),
+          h("div", { class: "track" }, [
+            h(
+              "div",
+              {
+                class: "split-bar inline",
+                style: { width: Math.max(1, (r.totalMs / max) * 100) + "%" },
+              },
+              bands
+                .filter((b) => b.ms > 0)
+                .map((b) =>
+                  h("div", {
+                    class: "split-seg",
+                    style: { width: (b.ms / total) * 100 + "%", background: modeColor(b.key) },
+                    title: MODE_LABEL[b.key] + " " + compact(b.ms),
+                  }),
+                ),
+            ),
+          ]),
+        ]);
+      }),
+    );
+  }
+
   /* ------------------------------------------------------------ bar geometry -- */
 
   /**
@@ -273,12 +407,22 @@
   /* ------------------------------------------------------------- the charts -- */
 
   /** Daily totals, stacked by project. The flagship time view. */
-  function trendChart(summary, width) {
-    const trend = summary.trend;
+  /**
+   * Stacked daily columns.
+   *
+   * Takes a trend object rather than reaching into `summary`, so the by-project and
+   * by-human/AI views are the SAME chart with a different stacking — one set of
+   * geometry, axis and tooltip behaviour to keep right, and the two read alike
+   * because they are alike.
+   */
+  function trendChart(trend, opts, width) {
+    const o = opts || {};
+    const colorFor = o.colorFor || ((k, i) => cssVar(k === "Other" ? OTHER : SERIES[i] || OTHER));
+    const labelFor = o.labelFor || ((k) => k);
     const keys = trend.keys;
     const colors = {};
     keys.forEach((k, i) => {
-      colors[k] = cssVar(k === "Other" ? OTHER : SERIES[i] || OTHER);
+      colors[k] = colorFor(k, i);
     });
 
     const pad = { l: 42, r: 8, t: 10, b: 26 };
@@ -300,7 +444,8 @@
       height: height,
       viewBox: "0 0 " + width + " " + height,
       role: "img",
-      "aria-label": "Daily coding time over the last " + trend.days + " days, stacked by project",
+      "aria-label":
+        "Daily coding time over the last " + trend.days + " days, " + (o.stackedBy || "stacked"),
     });
     yAxis(svg, plot, scale);
 
@@ -344,7 +489,7 @@
           present
             .slice()
             .reverse()
-            .map((k) => ({ label: shorten(k, 22), value: compact(col.values[k]), color: colors[k] }))
+            .map((k) => ({ label: shorten(labelFor(k), 22), value: compact(col.values[k]), color: colors[k] }))
             .concat([{ label: "Total", value: compact(col.total) }]),
         ),
       );
@@ -374,13 +519,13 @@
       keys.map((k) =>
         h("li", {}, [
           h("span", { class: "swatch", style: { background: colors[k] } }),
-          h("span", { text: shorten(k, 24), title: k }),
+          h("span", { text: shorten(labelFor(k), 24), title: labelFor(k) }),
         ]),
       ),
     );
 
     const table = dataTable(
-      ["Day"].concat(keys.map((k) => shorten(k, 16))).concat(["Total"]),
+      ["Day"].concat(keys.map((k) => shorten(labelFor(k), 16))).concat(["Total"]),
       cols.map((c) => [c.day].concat(keys.map((k) => compact(c.values[k]))).concat([compact(c.total)])),
     );
 
@@ -722,19 +867,117 @@
             : [h("span", { class: "live-dot idle" }), "idle · last beat " + ago(summary.data.msSinceLastBeat)],
         ),
         tile("Streak", summary.streak.current + "d", ["best " + summary.streak.longest + "d · " + summary.allTime.formatted + " all time"]),
+        tile(
+          "AI share · " + summary.week.days + "d",
+          (summary.week.split.aiShare * 100).toFixed(0) + "%",
+          [
+            compact(summary.week.split.aiMs) +
+              " AI · " +
+              compact(summary.week.split.humanMs) +
+              " human" +
+              (summary.week.split.overlapMs > 0 ? " · " + compact(summary.week.split.overlapMs) + " both" : ""),
+          ],
+        ),
       ]),
     );
 
     /* charts */
     const grid = h("div", { class: "grid" });
 
-    const trend = trendChart(summary, width);
+    const trend = trendChart(summary.trend, { stackedBy: "stacked by project" }, width);
     grid.appendChild(
       card(
         "Daily activity",
         "Last " + summary.trend.days + " days, stacked by project.",
         h("div", { class: "scroll-x" }, trend.svg),
         { wide: true, legend: trend.legend, table: trend.table },
+      ),
+    );
+
+    // ---- human vs AI ---------------------------------------------------------
+    // Two questions, two cards. "What is the mix" is a proportion of one window;
+    // "is it changing" needs the time axis, and cramming both into one card made
+    // neither legible.
+    const wk = summary.week.split;
+    const sb = splitBar(wk);
+    // Its own copy: the grid reflows to one column on a narrow panel, and a legend
+    // that only exists on the chart above can end up a screen away from these bars.
+    const bandLegend = () =>
+      h(
+        "ul",
+        { class: "legend" },
+        ["human-only", "concurrent", "ai-only"].map((k) =>
+          h("li", {}, [
+            h("span", { class: "swatch", style: { background: modeColor(k) } }),
+            h("span", { text: MODE_LABEL[k] }),
+          ]),
+        ),
+      );
+    const mixTrend = trendChart(
+      summary.agentTrend,
+      {
+        colorFor: modeColor,
+        labelFor: (k) => MODE_LABEL[k] || k,
+        stackedBy: "stacked by human versus AI",
+      },
+      width,
+    );
+
+    const noWrites =
+      summary.data.aiWrites === 0
+        ? " No agent write records on this machine, so an agent editing an open file still reads as human."
+        : "";
+
+    grid.appendChild(
+      card(
+        "Human vs AI over time",
+        "Last " +
+          summary.agentTrend.days +
+          " days. The three bands are disjoint, so each column adds to that day's total." +
+          noWrites,
+        h("div", {}, [
+          h("div", { class: "scroll-x" }, mixTrend.svg),
+          h("div", { class: "split-summary" }, [
+            h("div", { class: "split-summary-label", text: "Last " + summary.week.days + " days" }),
+            sb.bar,
+            h("p", {
+              class: "caption",
+              text:
+                "Union " +
+                compact(wk.unionMs) +
+                ". Human " +
+                compact(wk.humanMs) +
+                " and AI " +
+                compact(wk.aiMs) +
+                " overlap by " +
+                compact(wk.overlapMs) +
+                " — never add those two.",
+            }),
+          ]),
+        ]),
+        { wide: true, legend: mixTrend.legend, table: mixTrend.table },
+      ),
+    );
+
+    grid.appendChild(
+      card(
+        "AI share by project",
+        "Last " +
+          summary.week.days +
+          " days. Bar length is total time; the split within it is who wrote it.",
+        splitRows(summary.week.projectSplit),
+        {
+          legend: bandLegend(),
+          table: dataTable(
+            ["Project", "Human", "AI", "AI share"],
+            summary.week.projectSplit.map((r) => [
+              r.key,
+              compact(r.humanMs),
+              compact(r.aiMs),
+              (r.aiShare * 100).toFixed(0) + "%",
+            ]),
+          ),
+        },
       ),
     );
 
@@ -843,13 +1086,22 @@
         h("span", {
           class: "caveat",
           text:
-            "Editor activity, not work. Reading, thinking past " +
+            "Tracked tool activity, not work. Reading, thinking past " +
             Math.round(summary.idleTimeoutSeconds / 60) +
-            " minutes, and everything outside the editor count as zero — this is a floor under the real figure, not the figure.",
+            " minutes, and everything outside an editor or agent count as zero — this is a floor under the real figure, not the figure. Human and AI totals overlap; only the disjoint bands add up.",
         }),
         h("span", { text: "algorithm v" + summary.algorithmVersion }),
         h("span", { text: "config regime v" + summary.data.configVersionInForce + " · " + summary.data.intervalSecondsInForce + "s" }),
         h("span", { text: summary.data.heartbeats + " heartbeats · " + health }),
+        h("span", {
+          text:
+            summary.data.aiWrites === 0
+              ? "no agent write records — echo suppression off"
+              : summary.data.echoHeartbeats +
+                " echoes suppressed · " +
+                compact(summary.data.echoRemovedMs) +
+                " not counted as human",
+        }),
         h("span", { text: "idle timeout " + summary.idleTimeoutSeconds + "s · " + summary.timeZone }),
       ]),
     );

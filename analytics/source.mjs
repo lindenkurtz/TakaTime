@@ -6,6 +6,7 @@
  */
 
 import { connect } from "./scripts/_mongo.mjs";
+import { SUMMARY_VERSION } from "./summary.mjs";
 
 /**
  * Port server.mjs binds and every client probes. Fixed rather than negotiated
@@ -31,11 +32,22 @@ export async function fetchSummaryFromServer({ port = DEFAULT_PORT, timeoutMs = 
     });
     if (!res.ok) return null;
     const body = await res.json();
-    return body?.summaryVersion ? body : null;
+    if (!body?.summaryVersion) return null;
+
+    // A server started before an upgrade keeps running the OLD summary.mjs — it is a
+    // long-lived process the extension spawns and then leaves alone. Serving its
+    // response to a newer surface means missing fields at best and silently different
+    // MEANINGS at worst (1.x totals are editor time; 2.x totals are the union).
+    // Falling back to a direct query is slower and correct.
+    if (majorOf(body.summaryVersion) !== majorOf(SUMMARY_VERSION)) return null;
+
+    return body;
   } catch {
     return null;
   }
 }
+
+const majorOf = (v) => String(v).split(".")[0];
 
 /**
  * Only the fields the algorithm and the summary actually read.
@@ -55,6 +67,37 @@ export const PROJECTION = {
   os: 1,
   configVersion: 1,
 };
+
+/**
+ * Instants at which a coding agent modified a file, written by
+ * trackers/claude-code/import-claude.mjs.
+ *
+ * NOT heartbeats, and deliberately in their own collection: they carry no duration
+ * and must never reach the algorithm. summary.mjs uses them for one thing — deciding
+ * whether an editor heartbeat is the echo of an agent's write. See summary.mjs.
+ */
+export const AI_WRITES = "aiWrites";
+
+export const AI_WRITE_PROJECTION = { _id: 0, timestamp: 1, file: 1 };
+
+/**
+ * Every agent write, ascending.
+ *
+ * Returns [] if the collection does not exist, which is the normal state on a
+ * machine that has never run the importer. Echo suppression then does nothing, and
+ * the summary reports `aiWrites: 0` so the surfaces can say so.
+ */
+export async function fetchAiWritesFrom(db) {
+  try {
+    return await db
+      .collection(AI_WRITES)
+      .find({}, { projection: AI_WRITE_PROJECTION })
+      .sort({ timestamp: 1 })
+      .toArray();
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Every heartbeat, ascending.
@@ -78,6 +121,25 @@ export async function fetchHeartbeats(argv) {
 }
 
 /**
+ * Heartbeats and agent writes together, on one connection.
+ *
+ * Two round trips on one handshake rather than two handshakes: the Atlas connection
+ * is the expensive part, and every caller that wants one wants the other.
+ */
+export async function fetchAll(argv) {
+  const { client, db } = await connect(argv);
+  try {
+    const [heartbeats, aiWrites] = await Promise.all([
+      db.collection("logs").find({}, { projection: PROJECTION }).sort({ timestamp: 1 }).toArray(),
+      fetchAiWritesFrom(db),
+    ]);
+    return { heartbeats, aiWrites };
+  } finally {
+    await client.close();
+  }
+}
+
+/**
  * A long-lived Mongo connection with an in-memory heartbeat cache.
  *
  * Used by server.mjs. Refreshes on a timer and coalesces concurrent refreshes, so a
@@ -90,6 +152,7 @@ export class HeartbeatCache {
     this.client = null;
     this.db = null;
     this.heartbeats = [];
+    this.aiWrites = [];
     this.fetchedAtMs = 0;
     this.inFlight = null;
   }
@@ -120,7 +183,7 @@ export class HeartbeatCache {
 
     if (primed && !force) {
       if (stale && !this.inFlight) this.refresh().catch(() => {});
-      return this.heartbeats;
+      return { heartbeats: this.heartbeats, aiWrites: this.aiWrites };
     }
     return this.refresh();
   }
@@ -132,13 +195,16 @@ export class HeartbeatCache {
     this.inFlight = (async () => {
       try {
         await this.open();
-        this.heartbeats = await this.db
-          .collection("logs")
-          .find({}, { projection: PROJECTION })
-          .sort({ timestamp: 1 })
-          .toArray();
+        // Both, together. They are joined at read time, so a refresh that updated
+        // one and not the other would suppress echoes against a stale write list.
+        const [heartbeats, aiWrites] = await Promise.all([
+          this.db.collection("logs").find({}, { projection: PROJECTION }).sort({ timestamp: 1 }).toArray(),
+          fetchAiWritesFrom(this.db),
+        ]);
+        this.heartbeats = heartbeats;
+        this.aiWrites = aiWrites;
         this.fetchedAtMs = Date.now();
-        return this.heartbeats;
+        return { heartbeats, aiWrites };
       } finally {
         this.inFlight = null;
       }

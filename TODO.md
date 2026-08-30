@@ -96,6 +96,22 @@ and record the result.
 Prediction to check against: v3 totals should read ~4–5% *below* comparable v2 totals
 for identical work, with the discontinuity at the regime boundary.
 
+### Non-agentic AI is invisible
+
+The Claude Code importer measures *agentic* authorship: an agent that edited a file,
+recorded in a transcript. Inline completions and code pasted from a chat window leave
+no trace and read as human time. There is no obvious fix — VS Code exposes no "who
+made this edit" signal — but the limitation should not be forgotten when quoting an AI
+share. See METHODOLOGY.md § "What this cannot see".
+
+### The importer only sees this machine
+
+Transcripts are local to the machine that produced them, while heartbeats are central.
+`RoundsMod` is the worked example: near-100% agent-written on a Windows box, reading
+0% AI here because its transcripts never left that disk while its editor heartbeats
+did. Running `taka-claude-import` on each machine fixes it; nothing detects that it
+has not been run, so a machine silently contributes human-only time.
+
 ### Two spellings of the same project
 
 The data contains both `Takatime` and `TakaTime` as project names, and they are

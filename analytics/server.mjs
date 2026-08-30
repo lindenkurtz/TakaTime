@@ -22,7 +22,7 @@
  */
 
 import http from "node:http";
-import { buildSummary } from "./summary.mjs";
+import { agentOf, buildSummary } from "./summary.mjs";
 import { DEFAULT_PORT, HeartbeatCache } from "./source.mjs";
 
 const argv = process.argv.slice(2);
@@ -64,8 +64,17 @@ function send(res, status, body, contentType = "application/json") {
 
 async function handleSummary(url, res) {
   const q = url.searchParams;
-  const heartbeats = await cache.get({ force: q.get("fresh") === "1" });
+  const { heartbeats, aiWrites } = await cache.get({ force: q.get("fresh") === "1" });
   const editor = q.get("editor");
+  const agent = q.get("agent");
+
+  // `agent` narrows to one side of the human/AI split, `editor` to one tracker.
+  // Both are plain filters over the heartbeats, so the whole summary — leaderboards,
+  // streaks, heatmap — is recomputed for that subset rather than sliced after the
+  // fact. Combining them is allowed and means the intersection.
+  const filters = [];
+  if (editor) filters.push((hb) => hb.editor === editor);
+  if (agent) filters.push((hb) => agentOf(hb) === agent);
 
   const summary = buildSummary(heartbeats, {
     weekDays: q.has("days") ? Number(q.get("days")) : undefined,
@@ -73,7 +82,8 @@ async function handleSummary(url, res) {
     heatmapDays: q.has("heatmapDays") ? Number(q.get("heatmapDays")) : undefined,
     timeZone: q.get("tz") ?? undefined,
     idleTimeoutSeconds: q.has("idle") ? Number(q.get("idle")) : undefined,
-    ...(editor ? { filter: (hb) => hb.editor === editor } : {}),
+    aiWrites,
+    ...(filters.length ? { filter: (hb) => filters.every((f) => f(hb)) } : {}),
   });
 
   send(res, 200, summary);
@@ -82,7 +92,9 @@ async function handleSummary(url, res) {
 const ROOT = `TakaTime stats server
 
   GET /api/summary   the summary object every surface renders
-                     ?days= ?topN= ?heatmapDays= ?editor= ?tz= ?idle= ?fresh=1
+                     ?days= ?topN= ?heatmapDays= ?tz= ?idle= ?fresh=1
+                     ?agent=human|ai    one side of the human/AI split
+                     ?editor=VsCode     one tracker
   GET /api/health    liveness, cache age, heartbeat count
 
 Numbers are derived at query time by duration.mjs. The legacy 'duration' field is
@@ -109,6 +121,7 @@ const server = http.createServer(async (req, res) => {
         uptimeMs: Date.now() - startedAtMs,
         requestCount,
         heartbeats: cache.heartbeats.length,
+        aiWrites: cache.aiWrites.length,
         cacheAgeMs: cache.fetchedAtMs ? Date.now() - cache.fetchedAtMs : null,
         ttlMs: TTL_MS,
       });
@@ -131,7 +144,9 @@ server.listen(PORT, "127.0.0.1", async () => {
   process.stdout.write(`takatime stats server on http://127.0.0.1:${PORT} (pid ${process.pid})\n`);
   try {
     await cache.get({ force: true });
-    process.stdout.write(`cached ${cache.heartbeats.length} heartbeats\n`);
+    process.stdout.write(
+      `cached ${cache.heartbeats.length} heartbeats, ${cache.aiWrites.length} agent writes\n`,
+    );
   } catch (err) {
     // Warm-up failure is not fatal: Mongo may just be slow or briefly unreachable, and
     // the next request retries. Exiting here would make the extension respawn in a loop.

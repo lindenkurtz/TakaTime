@@ -11,7 +11,10 @@ dashboard and a JS analytics layer.
 ```
 WRITE   VS Code extension ──spawn──> taka-upload (Go) ──> MongoDB (takatime.logs)
         (120s throttle)                                        │
-        Mathematica tracker ──pymongo──────────────────────────┘
+        Mathematica tracker ──pymongo──────────────────────────┤
+                                                               │
+        ~/.claude/projects/*.jsonl ──> import-claude.mjs ───────┤
+        (Claude Code transcripts)     (idempotent importer)     └─> takatime.aiWrites
 
 READ    MongoDB ──> analytics/server.mjs ──> summary.mjs ──> duration.mjs
                     (localhost:47612)             │
@@ -26,10 +29,21 @@ One git repo, root at `TakaTime/`. The VS Code extension is nested inside it at
 `vscodePlugin/Takatime/` — work from the repo root, not from inside the extension,
 or the Go half is invisible.
 
-## The one rule that matters
+## The two rules that matter
 
 **A heartbeat is an observation, not a duration.** Nothing about elapsed time is
 stored. Durations are derived at query time from the pattern of timestamps.
+
+**Human and AI time overlap; never add them.** You at the keyboard while an agent
+works is time that belongs to both. `summary.mjs` publishes the union as the total and
+`split` as the decomposition — `humanOnlyMs + overlapMs + aiOnlyMs === unionMs`
+exactly, while `humanMs + aiMs` deliberately exceeds it.
+
+The three bands are a **grouping dimension** (`mode`) over the merged stream, never
+arithmetic on two separate totals. `overlap = human + ai − union` looks equivalent and
+goes NEGATIVE when the streams interleave instead of co-occurring, because merging
+them closes a gap neither could see alone. Anything drawing a stacked bar must use the
+bands; anything drawing two side-by-side totals must say they overlap.
 
 **Never sum the `duration` field.** It is legacy, exists only on pre-v3 records, and
 holds the tracker's throttle interval rather than measured time. Summing it
@@ -75,6 +89,27 @@ looked perfect, because SVG `fill` is a presentation attribute and was unaffecte
 takes `style` as an object and `Object.assign`s it onto `node.style`. **A headless
 render without the CSP meta tag will not reproduce this** — copy the real
 `Content-Security-Policy` into the harness when design-reviewing.
+
+**The `agent` dimension is derived at read time, never stored.** `summary.mjs` maps
+`editor` to human/ai through `AI_EDITORS`. There is no `agent` field in the database
+and no migration created one — adding a tracker means adding its editor value to that
+set, not a schema change.
+
+**Echo is a measurement artifact, not a grey zone.** VS Code fires
+`onDidChangeTextDocument` when an agent edits an open file and cannot tell who typed,
+so agent work was landing in human time — 9.4% of the whole editor record. Editor
+heartbeats matching an `aiWrites` record for the *same file* within `[-2s, +20s]` are
+dropped from attribution entirely. Not reassigned: the agent's own heartbeats already
+cover that span, so reassigning would double-count. Without the `aiWrites` collection
+the join is a no-op and totals revert to pre-agent behaviour — that fail-safe is
+deliberate and is tested.
+
+**AI time requires authorship, not presence.** A Claude Code session that never
+modified a file is advisory and contributes nothing. Getting this wrong marked two
+hand-written projects as 15% and 24% AI. Shell heredocs (`cat > f << EOF`, `sed -i`)
+count as authorship; bare `>` redirects do not, because they are usually compiler
+output. Both directions are pinned by tests — do not loosen either without new
+ground truth.
 
 **Config boundaries are empirical, read off the data, not the git log.** Commits
 landed 2026-04-21 but the rebuilt binary was not installed until 2026-04-23. The
@@ -123,10 +158,15 @@ npm run export                       # self-contained analysis bundle (folder + 
 npm run build-fixture                # regenerate fixture from live data (moves calibration)
 npm run serve                        # stats server on 127.0.0.1:47612
 npm run taka -- doctor               # CLI; --direct skips the server
+
+cd ..                                # Claude Code importer, from the repo root
+node trackers/claude-code/import-claude.mjs           # dry run
+node trackers/claude-code/import-claude.mjs --apply   # commit (idempotent)
 ```
 
 `taka` subcommands: `summary` (default) `today` `week` `now` `sessions` `hours` `all`
-`doctor`. `--oneline` is the shell-prompt form; `--json` dumps the whole summary.
+`split` `doctor`. `--oneline` is the shell-prompt form; `--json` dumps the whole
+summary. `--agent human|ai` narrows to one side of the split.
 
 **The panel can be rendered without VS Code.** Inline `media/panel.css` and
 `media/panel.js` into one HTML file, stub `acquireVsCodeApi()`, and
@@ -147,19 +187,27 @@ Mongo URI resolution order: `--uri` flag, `$TAKATIME_MONGO_URI` / `$MONGO_URI`, 
   unreliable (84 historical records disagree with their own timestamp, from a period
   when the machine ran in UTC) and is ignored in favour of `timestamp`.
 - Calibration must stay within ±10% on the 7-day total. The test fails otherwise.
+- **The Claude Code importer is additive and idempotent.** Deterministic `_id`s
+  (`cc:` / `cw:` prefixes) and `$setOnInsert` only. Re-running is free; it is meant to
+  be driven by a hook. Undo is `db.logs.deleteMany({editor: "ClaudeCode"})` plus
+  `db.aiWrites.drop()`, and touches nothing that was there before.
+- **`aiWrites` is not a heartbeat collection.** Those records carry no duration and
+  must never reach `duration.mjs`. They exist for the echo join and nothing else.
 
-## Two trackers, one regime timeline
+## Three trackers, one regime timeline
 
-| Tracker | Source | Writes via | Editor field |
-|---|---|---|---|
-| VS Code | `vscodePlugin/Takatime/` | `taka-upload` (Go) | `VsCode` |
-| Mathematica | `trackers/mathematica/` | pymongo, direct | `Mathematica` |
+| Tracker | Source | Writes via | Editor field | Agent |
+|---|---|---|---|---|
+| VS Code | `vscodePlugin/Takatime/` | `taka-upload` (Go) | `VsCode` | human |
+| Mathematica | `trackers/mathematica/` | pymongo, direct | `Mathematica` | human |
+| Claude Code | `trackers/claude-code/` | Node driver, direct | `ClaudeCode` | ai |
 
-Both share the same config regimes on the same boundaries — verified against the data,
-and asserted by the test `Mathematica shares the VS Code regime timeline`. **That
-alignment is load-bearing:** it is the only reason `CONFIG_REGISTRY` can be a single
-linear series. If the trackers ever diverge, the registry must become per-tracker,
-which is a schema change — ask first.
+All three share the same config regimes on the same boundaries — verified against the
+data, and asserted by the tests `Mathematica shares the VS Code regime timeline` and
+`Claude Code shares the VS Code regime timeline`. **That alignment is load-bearing:**
+it is the only reason `CONFIG_REGISTRY` can be a single linear series. If the trackers
+ever diverge, the registry must become per-tracker, which is a schema change — ask
+first.
 
 Changing the Mathematica throttle means updating three constants together:
 `$TakatimeInterval` (`TakatimePalette.wl`), `CONFIG_VERSION`

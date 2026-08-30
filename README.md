@@ -135,17 +135,49 @@ display renders — **no surface computes a duration of its own.**
 
 // takatime.configs — one document per throttle regime, with ISO-8601 boundaries
 { version, intervalSeconds, scope, from, to }
+
+// takatime.aiWrites — instants an agent modified a file. NOT heartbeats: no duration,
+// never reaches the algorithm. Used to tell an agent's edit apart from yours.
+{ timestamp, file, editor, os }
 ```
 
 ## Trackers
 
-| Tracker | Source | Writes via |
-|---|---|---|
-| VS Code | [`vscodePlugin/Takatime/`](vscodePlugin/Takatime/) | `taka-upload` (Go) |
-| Mathematica | [`trackers/mathematica/`](trackers/mathematica/) | pymongo, direct |
+| Tracker | Source | Writes via | Agent |
+|---|---|---|---|
+| VS Code | [`vscodePlugin/Takatime/`](vscodePlugin/Takatime/) | `taka-upload` (Go) | human |
+| Mathematica | [`trackers/mathematica/`](trackers/mathematica/) | pymongo, direct | human |
+| Claude Code | [`trackers/claude-code/`](trackers/claude-code/) | Node driver, direct | ai |
 
-Both share the same throttle regime timeline, which is why the config registry is a
-single linear series. See [METHODOLOGY.md](METHODOLOGY.md#trackers).
+All three share the same throttle regime timeline, which is why the config registry is
+a single linear series. See [METHODOLOGY.md](METHODOLOGY.md#trackers).
+
+## Human and AI time
+
+Agent sessions are tracked beside editor activity and stay separable.
+
+```sh
+taka split                              # human vs AI, overall and per project
+taka --agent ai                         # the whole dashboard, agent time only
+node trackers/claude-code/import-claude.mjs --apply
+```
+
+**The two overlap and are never added.** You at the keyboard while an agent works is
+time that belongs to both, so the headline total is the *union* and the split is
+reported as three disjoint bands — human only, both at once, AI only — that add up to
+it exactly.
+
+Two things this gets right that a naive version does not:
+
+- **Echo.** VS Code cannot tell who edited an open file, so an agent's writes were
+  being logged as your typing — 9.4% of the entire editor record. Editor heartbeats
+  matching an agent write to the same file are dropped as duplicate observations.
+- **Authorship, not presence.** A session where the agent only answered questions is
+  advisory and counts as your time, not its.
+
+See [METHODOLOGY.md](METHODOLOGY.md#human-and-ai-time) for how both rules were
+calibrated, and [`trackers/claude-code/`](trackers/claude-code/) to set up live
+capture.
 
 ## License
 

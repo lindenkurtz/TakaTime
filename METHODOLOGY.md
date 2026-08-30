@@ -356,10 +356,16 @@ Two trackers write to this database. **Both share the config regime timeline abo
 that alignment is why `CONFIG_REGISTRY` is a single linear series rather than being
 keyed per tracker.
 
-| Tracker | Source | Writes via | Editor field |
-|---|---|---|---|
-| VS Code | [`vscodePlugin/Takatime/`](vscodePlugin/Takatime/) | `taka-upload` (Go) | `VsCode` |
-| Mathematica | [`trackers/mathematica/`](trackers/mathematica/) | pymongo, direct | `Mathematica` |
+| Tracker | Source | Writes via | Editor field | Agent |
+|---|---|---|---|---|
+| VS Code | [`vscodePlugin/Takatime/`](vscodePlugin/Takatime/) | `taka-upload` (Go) | `VsCode` | human |
+| Mathematica | [`trackers/mathematica/`](trackers/mathematica/) | pymongo, direct | `Mathematica` | human |
+| Claude Code | [`trackers/claude-code/`](trackers/claude-code/) | Node driver, direct | `ClaudeCode` | ai |
+
+The Claude Code tracker is an **importer**, not an emitter: it reads transcripts
+Claude Code has already written and converts them after the fact. It introduces no new
+config regime — it reads the interval already in force rather than choosing one. See
+[Human and AI time](#human-and-ai-time).
 
 The Mathematica tracker was previously undocumented and excluded from the migration,
 because its throttle history was unknown. Its source now lives in this repository, and
@@ -411,6 +417,162 @@ heartbeat landing in that window without a stamp means an old binary is still
 running, and guessing its interval would hide a real deployment problem.
 
 ---
+
+## Human and AI time
+
+Since 2026-05-21 some of the work in this database was written by a coding agent
+rather than by hand. The database records both, and keeps them separable.
+
+### The two are not disjoint
+
+This is the fact everything else follows from. You sit at the keyboard while an agent
+works — reading its output, editing another file, steering it. That time is genuinely
+both, so **human and AI totals overlap and must never be added.**
+
+Three quantities, over all history since the first agent session:
+
+| | |
+|---|---|
+| Human — a person was at the keyboard | 133h20m |
+| AI — an agent was working | 12h05m |
+| Sum of the two | 145h26m ← **wrong** |
+| Union — actual wall clock | 143h55m |
+| Overlap, counted in both | 1h31m |
+
+`summary.mjs` publishes the union as the top-level total and carries the
+decomposition in `split` on every window:
+
+```
+human-only  131h49m  ┐
+concurrent    1h31m  ├─ disjoint, sum to the union exactly
+ai-only      10h34m  ┘
+
+human = human-only + concurrent      ┐ overlapping,
+ai    = ai-only    + concurrent      ┘ never added
+```
+
+The three **disjoint** bands sum to `unionMs` exactly, in integer milliseconds, which
+is what makes them safe to draw as a stacked bar. The two **overlapping** figures are
+derived from the same bands, so they always reconcile.
+
+### The bands are measured, not inferred
+
+The overlap is a **grouping dimension over the merged stream**, not arithmetic on two
+separate totals. A heartbeat is `concurrent` when the other stream also observed
+something within the throttle interval in force at that instant — the finest
+resolution at which either stream can see anything, resolved per heartbeat so the v2
+era is judged at its own 300s rather than v3's 120s. The band is then read off the
+earlier heartbeat of each pair, exactly like every other dimension.
+
+Defining it as `human + ai − union` instead looks equivalent and is not. When the two
+streams **interleave** rather than co-occur, merging them closes a gap neither can see
+alone, so the union *exceeds* the sum and the "overlap" goes negative:
+
+| | |
+|---|---|
+| Editor heartbeat at 16:00, agent heartbeat at 16:05, nothing else | |
+| Union | 420s (one 300s span plus a 120s head credit) |
+| Editor stream alone | 120s |
+| Agent stream alone | 120s |
+| `human + ai − union` | **−180s** |
+
+Clamping that to zero silently breaks the partition the stacked bar is drawn from.
+Measuring the bands instead makes it exact by construction and is what lets the split
+be broken down per day and per project without the error compounding. Asserted by
+`the bands survive two streams that interleave without co-occurring`.
+
+Note what the 5-minute spacing means there: at a 120s throttle the two observations
+are too far apart to claim concurrency, so that time is interleaving, not overlap.
+
+> **`SUMMARY_VERSION` 2.0.0 is a meaning change, not just a shape change.** Before it,
+> top-level totals were editor activity. After it they are the union. A 1.x number and
+> a 2.x number over the same data are not comparable.
+
+### Echo: the editor cannot tell who typed
+
+When an agent writes a file that is open in VS Code, the editor fires
+`onDidChangeTextDocument` and logs a heartbeat. There is no API that says who made the
+edit, so **the agent's own work was being recorded as yours.**
+
+Those heartbeats are duplicate observations: the agent's heartbeats already cover that
+span. They are dropped from attribution entirely rather than reassigned — reassigning
+them would double-count against the agent stream.
+
+An editor heartbeat is an echo when the agent wrote **that same file** within
+`[-2s, +20s]` of it. The join is on path as well as instant, deliberately: a
+time-window rule alone would swallow genuine parallel work on a different file.
+
+Measured over the corpus: **84 heartbeats, 5h06m of human time, 9.4% of the entire
+editor record.** Its effect on the *union* is near zero by construction, which is why
+`data.echoRemovedMs` reports the human-side figure — quoting the union effect would
+make a correction worth five hours look like it was worth two minutes.
+
+Suppression needs the `aiWrites` collection. Without it the join is a no-op and every
+number is what it was before agents existed. That is deliberate: a machine that has not
+run the importer under-reports the split rather than inventing one.
+
+### Authorship, not presence
+
+A session in which the agent never modified a file is **advisory** — you asked
+questions while doing the work yourself — and contributes nothing.
+
+This rule exists because the first version of this analysis did not have it, and was
+wrong in a way only the author could see. Measured AI share was checked against
+recollection of which projects were actually AI-written:
+
+| Project | Presence rule | Authorship rule | Recalled |
+|---|---|---|---|
+| focusd | 59% | 98% | ~100% AI |
+| TakaTime | 75% | 98% | 75–95% AI |
+| pi_estimation | 68% | 73% | 65–75% AI |
+| lab1-datalab | 15% | 13% | all human ✓ |
+| playground | 24% | 10% | ~all human ✓ |
+| modernC-exercises | 0% | 0% | all human ✓ |
+
+The two hand-written projects read as 15% and 24% AI under the presence rule purely
+because a session was open. Under the authorship rule the residue is real: datalab's
+13% was an agent building a devcontainer, which the recollection had simply forgotten.
+
+**Shell writes count; shell redirects do not.** The agent authors code through
+`cat > file << 'EOF'` heredocs as readily as through an edit tool — pi_estimation is
+93 Bash calls and zero Edit calls, and reads 0% AI without this. But a bare `> file`
+redirect is usually compiler or test output; datalab issued twelve of those while the
+human wrote every line. Both directions are pinned by tests.
+
+### Commensurability, and why there is no regime v4
+
+The raw transcript is ~50× denser than an editor heartbeat stream (median gap 2.2s
+against 120s). Feeding it in unchanged would not be wrong so much as **incomparable**:
+a stream with almost no unobserved gaps measures a different thing than the one beside
+it.
+
+The importer downsamples to the interval in force at each instant, read from
+`CONFIG_REGISTRY`. Cost over the whole corpus: 11h53m unthrottled against 11h24m
+throttled, **4%** — the same order as the config-invariance drift between regimes.
+
+**This is why the tracker adds no config regime.** A regime describes a throttle
+interval and scope; this tracker does not choose one, it reads the one already in
+force. Stamping a new version with identical parameters would assert a change the data
+does not show, contradicting [Boundaries are empirical](#boundaries-are-empirical-not-from-the-git-log)
+— and it would mis-credit the backfill, whose pre-2026-08-08 heartbeats were thinned
+at v2's 300s and must be stamped v2 to be read back correctly. The alignment is
+asserted by the test `Claude Code shares the VS Code regime timeline`.
+
+### What this cannot see
+
+**Other machines.** Transcripts are local. `RoundsMod` reads 0% AI here and was in fact
+almost entirely agent-written — on a Windows machine, whose heartbeats
+(`c:\Users\Linud\…`) reached this database while its transcripts never left that
+disk. Run the importer on every machine, or that machine's AI time stays invisible
+while its editor time does not.
+
+**Non-agentic AI.** Completions accepted inline, or code pasted from a chat window,
+leave no transcript and no file-write record. They read as human. This measures
+*agentic* authorship, not the presence of a model in the loop.
+
+**The overlap is a floor.** The measured concurrency is what two throttled streams
+happened to both observe within one interval of each other. Genuine simultaneous work
+that falls between heartbeats is invisible to both, so the real figure is higher.
 
 ## Calibration
 

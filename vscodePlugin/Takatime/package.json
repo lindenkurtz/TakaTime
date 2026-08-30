@@ -2,7 +2,7 @@
   "name": "takatime",
   "displayName": "TakaTime - Privacy First Time Tracker",
   "description": "A privacy-first, serverless time tracker. Track coding metrics, visualize productivity, and maintain full data ownership.",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "license": "MIT",
   "publisher": "local-dev",
   "icon": "public/TakatimeLogo.png",
